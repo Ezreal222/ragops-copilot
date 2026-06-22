@@ -1,6 +1,6 @@
-<svg viewBox="0 0 1000 600" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, 'PingFang SC', Arial, sans-serif">
-<title>Flagship RAG + Agent 系统架构</title>
-<desc>离线 ingestion 把语料切分嵌入进 OpenSearch 向量库；在线 query 经 Agent 调用检索工具→reranker→LLM 生成；旁路有 Eval harness；外层 FastAPI/Docker/AWS 部署与监控。</desc>
+<svg viewBox="0 0 1000 600" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Arial, sans-serif">
+<title>Flagship RAG + Agent System Architecture</title>
+<desc>Offline ingestion chunks and embeds the corpus into the OpenSearch vector store; online query goes through an Agent that calls the retrieval tool, then reranker, then LLM generation; an Eval harness sits to the side; the outer layer is FastAPI/Docker/AWS deployment and monitoring.</desc>
 <rect x="0" y="0" width="1000" height="600" fill="#F0EEE6"/>
 <style>
 .t{fill:#1f1e1d;font-size:13px;font-weight:600}
@@ -12,10 +12,10 @@
 .h{font-family:Georgia,serif;fill:#1f1e1d;font-size:18px;font-weight:600}
 </style>
 
-<text class="h" x="28" y="40">RAGOps Copilot · 架构图（语料：vLLM docs）</text>
+<text class="h" x="28" y="40">RAGOps Copilot · Architecture (corpus: vLLM docs)</text>
 
 <!-- ===== OFFLINE INGESTION lane ===== -->
-<text class="lane" x="28" y="78">① 离线 INGESTION（W4 D2–D3）</text>
+<text class="lane" x="28" y="78">1. OFFLINE INGESTION (W4 D2-D3)</text>
 <rect class="box" x="28" y="92" width="140" height="50" rx="9"/>
 <text class="t" x="98" y="113" text-anchor="middle">vLLM docs</text>
 <text class="s" x="98" y="130" text-anchor="middle">docs.vllm.ai</text>
@@ -26,11 +26,11 @@
 
 <rect class="box" x="382" y="92" width="150" height="50" rx="9"/>
 <text class="t" x="457" y="113" text-anchor="middle">Embedding</text>
-<text class="s" x="457" y="130" text-anchor="middle">嵌入模型</text>
+<text class="s" x="457" y="130" text-anchor="middle">embedding model</text>
 
 <rect class="db" x="564" y="92" width="170" height="50" rx="9"/>
-<text class="t" x="649" y="113" text-anchor="middle">OpenSearch 向量库</text>
-<text class="s" x="649" y="130" text-anchor="middle">vector index（现成栈）</text>
+<text class="t" x="649" y="113" text-anchor="middle">OpenSearch vector DB</text>
+<text class="s" x="649" y="130" text-anchor="middle">vector index (existing stack)</text>
 
 <g stroke="#33312e" stroke-width="1.6" fill="none" marker-end="url(#a)">
   <line x1="168" y1="117" x2="200" y2="117"/>
@@ -42,37 +42,37 @@
 <line x1="28" y1="170" x2="972" y2="170" stroke="#33312e" stroke-opacity="0.15" stroke-width="1"/>
 
 <!-- ===== ONLINE lane ===== -->
-<text class="lane" x="28" y="200">② 在线 QUERY（W4 D4–D6 + W6 Agent）</text>
+<text class="lane" x="28" y="200">2. ONLINE QUERY (W4 D4-D6 + W6 Agent)</text>
 
 <rect class="box" x="28" y="220" width="120" height="50" rx="9"/>
-<text class="t" x="88" y="241" text-anchor="middle">用户 Query</text>
-<text class="s" x="88" y="258" text-anchor="middle">问题</text>
+<text class="t" x="88" y="241" text-anchor="middle">User Query</text>
+<text class="s" x="88" y="258" text-anchor="middle">question</text>
 
 <!-- Agent -->
 <rect class="acc" x="186" y="210" width="170" height="120" rx="11"/>
-<text class="t" x="271" y="232" text-anchor="middle">Agent（W6）</text>
+<text class="t" x="271" y="232" text-anchor="middle">Agent (W6)</text>
 <text class="s" x="271" y="250" text-anchor="middle">LangGraph</text>
 <text class="s" x="271" y="266" text-anchor="middle">planning + tool loop</text>
-<text class="s" x="271" y="286" text-anchor="middle">guardrails / 兜底</text>
+<text class="s" x="271" y="286" text-anchor="middle">guardrails / fallback</text>
 <rect class="box" x="200" y="296" width="142" height="26" rx="6"/>
-<text class="s" x="271" y="313" text-anchor="middle">tools: 检索 + 其它</text>
+<text class="s" x="271" y="313" text-anchor="middle">tools: retrieval + others</text>
 
 <!-- Retrieval pipeline -->
 <rect class="box" x="392" y="200" width="140" height="44" rx="9"/>
-<text class="t" x="462" y="219" text-anchor="middle">检索 Retrieve</text>
-<text class="s" x="462" y="235" text-anchor="middle">语义检索 recall@k</text>
+<text class="t" x="462" y="219" text-anchor="middle">Retrieve</text>
+<text class="s" x="462" y="235" text-anchor="middle">semantic search · recall@k</text>
 
 <rect class="box" x="392" y="256" width="140" height="44" rx="9"/>
 <text class="t" x="462" y="275" text-anchor="middle">Rerank</text>
 <text class="s" x="462" y="291" text-anchor="middle">bge-reranker</text>
 
 <rect class="acc" x="568" y="228" width="150" height="50" rx="9"/>
-<text class="t" x="643" y="249" text-anchor="middle">LLM 生成</text>
+<text class="t" x="643" y="249" text-anchor="middle">LLM Generation</text>
 <text class="s" x="643" y="265" text-anchor="middle">Claude / OpenAI API</text>
 
 <rect class="box" x="754" y="228" width="120" height="50" rx="9"/>
-<text class="t" x="814" y="249" text-anchor="middle">答案 + 引用</text>
-<text class="s" x="814" y="265" text-anchor="middle">Answer</text>
+<text class="t" x="814" y="249" text-anchor="middle">Answer</text>
+<text class="s" x="814" y="265" text-anchor="middle">+ citations</text>
 
 <g stroke="#33312e" stroke-width="1.6" fill="none" marker-end="url(#a)">
   <line x1="148" y1="245" x2="186" y2="245"/>
@@ -83,29 +83,29 @@
 </g>
 <!-- retrieve to vector db (up) -->
 <line x1="462" y1="200" x2="640" y2="144" stroke="#9bb0c4" stroke-width="1.4" stroke-dasharray="5 4" fill="none" marker-end="url(#b)"/>
-<text class="s" x="540" y="182" fill="#9bb0c4">查向量库</text>
+<text class="s" x="540" y="182" fill="#9bb0c4">query vector DB</text>
 
 <!-- ===== EVAL (side) ===== -->
 <rect class="box" x="392" y="330" width="200" height="40" rx="9" stroke-dasharray="5 3"/>
-<text class="s" x="492" y="355" text-anchor="middle">③ Eval harness（W5）：RAGAS / LLM-judge</text>
+<text class="s" x="492" y="355" text-anchor="middle">3. Eval harness (W5): RAGAS / LLM-judge</text>
 <line x1="492" y1="300" x2="492" y2="330" stroke="#33312e" stroke-width="1.2" stroke-dasharray="4 3" fill="none" marker-end="url(#a)"/>
 
 <!-- ===== SERVING outer ===== -->
 <rect x="28" y="406" width="846" height="80" rx="12" fill="none" stroke="#d97757" stroke-width="1.4" stroke-dasharray="7 4"/>
-<text class="lane" x="44" y="428" fill="#c2643f">④ SERVING / MLOps（W7）</text>
+<text class="lane" x="44" y="428" fill="#c2643f">4. SERVING / MLOps (W7)</text>
 <text class="t" x="60" y="458">FastAPI</text>
-<text class="s" x="60" y="474">REST 服务</text>
+<text class="s" x="60" y="474">REST service</text>
 <text class="t" x="200" y="458">Docker</text>
-<text class="s" x="200" y="474">容器镜像</text>
-<text class="t" x="330" y="458">AWS 部署</text>
-<text class="s" x="330" y="474">Lambda/ECS + 前端</text>
-<text class="t" x="520" y="458">监控</text>
-<text class="s" x="520" y="474">延迟/成本/失败率</text>
+<text class="s" x="200" y="474">container image</text>
+<text class="t" x="330" y="458">AWS deploy</text>
+<text class="s" x="330" y="474">Lambda/ECS + frontend</text>
+<text class="t" x="520" y="458">Monitoring</text>
+<text class="s" x="520" y="474">latency / cost / failure rate</text>
 <text class="t" x="680" y="458">CI/CD</text>
 <text class="s" x="680" y="474">GitHub Actions</text>
 
-<text class="s" x="28" y="520">指标：检索 recall@k、RAGAS(faithfulness/answer relevancy/context precision-recall)、p95 延迟、cost/query</text>
-<text class="s" x="28" y="540">技术栈：LangChain · OpenSearch · bge-reranker · LangGraph · Claude/OpenAI · FastAPI · Docker · AWS · RAGAS</text>
+<text class="s" x="28" y="520">Metrics: retrieval recall@k, RAGAS (faithfulness / answer relevancy / context precision-recall), p95 latency, cost/query</text>
+<text class="s" x="28" y="540">Tech stack: LangChain · OpenSearch · bge-reranker · LangGraph · Claude/OpenAI · FastAPI · Docker · AWS · RAGAS</text>
 
 <defs>
   <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#33312e"/></marker>
