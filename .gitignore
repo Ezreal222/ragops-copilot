@@ -1,6 +1,9 @@
 # --- Secrets ---
 .env
 
+# --- Local-only project brief (personal learning plan, not for the public repo) ---
+CLAUDE.md
+
 # --- Data: corpus, crawled/cloned docs, index dumps (keep the dir, not its contents) ---
 data/*
 !data/.gitkeep
