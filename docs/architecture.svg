@@ -15,7 +15,7 @@
 <text class="h" x="28" y="40">RAGOps Copilot · Architecture (corpus: vLLM docs)</text>
 
 <!-- ===== OFFLINE INGESTION lane ===== -->
-<text class="lane" x="28" y="78">1. OFFLINE INGESTION (W4 D2-D3)</text>
+<text class="lane" x="28" y="78">1. OFFLINE INGESTION</text>
 <rect class="box" x="28" y="92" width="140" height="50" rx="9"/>
 <text class="t" x="98" y="113" text-anchor="middle">vLLM docs</text>
 <text class="s" x="98" y="130" text-anchor="middle">docs.vllm.ai</text>
@@ -42,7 +42,7 @@
 <line x1="28" y1="170" x2="972" y2="170" stroke="#33312e" stroke-opacity="0.15" stroke-width="1"/>
 
 <!-- ===== ONLINE lane ===== -->
-<text class="lane" x="28" y="200">2. ONLINE QUERY (W4 D4-D6 + W6 Agent)</text>
+<text class="lane" x="28" y="200">2. ONLINE QUERY</text>
 
 <rect class="box" x="28" y="220" width="120" height="50" rx="9"/>
 <text class="t" x="88" y="241" text-anchor="middle">User Query</text>
@@ -50,7 +50,7 @@
 
 <!-- Agent -->
 <rect class="acc" x="186" y="210" width="170" height="120" rx="11"/>
-<text class="t" x="271" y="232" text-anchor="middle">Agent (W6)</text>
+<text class="t" x="271" y="232" text-anchor="middle">Agent</text>
 <text class="s" x="271" y="250" text-anchor="middle">LangGraph</text>
 <text class="s" x="271" y="266" text-anchor="middle">planning + tool loop</text>
 <text class="s" x="271" y="286" text-anchor="middle">guardrails / fallback</text>
@@ -87,12 +87,12 @@
 
 <!-- ===== EVAL (side) ===== -->
 <rect class="box" x="392" y="330" width="200" height="40" rx="9" stroke-dasharray="5 3"/>
-<text class="s" x="492" y="355" text-anchor="middle">3. Eval harness (W5): RAGAS / LLM-judge</text>
+<text class="s" x="492" y="355" text-anchor="middle">3. Eval harness: RAGAS / LLM-judge</text>
 <line x1="492" y1="300" x2="492" y2="330" stroke="#33312e" stroke-width="1.2" stroke-dasharray="4 3" fill="none" marker-end="url(#a)"/>
 
 <!-- ===== SERVING outer ===== -->
 <rect x="28" y="406" width="846" height="80" rx="12" fill="none" stroke="#d97757" stroke-width="1.4" stroke-dasharray="7 4"/>
-<text class="lane" x="44" y="428" fill="#c2643f">4. SERVING / MLOps (W7)</text>
+<text class="lane" x="44" y="428" fill="#c2643f">4. SERVING / MLOps</text>
 <text class="t" x="60" y="458">FastAPI</text>
 <text class="s" x="60" y="474">REST service</text>
 <text class="t" x="200" y="458">Docker</text>

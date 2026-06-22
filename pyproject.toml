@@ -1,7 +1,7 @@
 [project]
 name = "ragops-copilot"
 version = "0.1.0"
-description = "Production-grade RAG (later + Agent) assistant over the vLLM docs, with measured retrieval quality (recall@k)."
+description = "Production-grade RAG (and Agent) assistant over the vLLM docs, with measured retrieval quality (recall@k)."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
