@@ -1,0 +1,23 @@
+# --- Secrets ---
+.env
+
+# --- Data: corpus, crawled/cloned docs, index dumps (keep the dir, not its contents) ---
+data/*
+!data/.gitkeep
+
+# --- Python ---
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- Model weights / large artifacts ---
+*.pth
+*.pt
+*.bin
+*.safetensors
+
+# --- OS / editor ---
+.DS_Store
