@@ -1,4 +1,4 @@
-"""Step (D3) — OpenSearch client + k-NN index definition.
+"""OpenSearch client + k-NN index definition.
 
 This is the "vector database" half of the corpus. We define an index with:
   - one `knn_vector` field holding the 384-dim chunk embedding, searched with

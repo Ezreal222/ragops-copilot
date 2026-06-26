@@ -1,4 +1,4 @@
-"""Step 3 — materialize chunks to data/chunks.jsonl for embedding.
+"""materialize chunks to data/chunks.jsonl for embedding.
 
 This is the end of the offline ingestion stage: load -> clean -> chunk ->
 **persist**. Reads `chunks.jsonl` directly to embed + index, so it doesn't

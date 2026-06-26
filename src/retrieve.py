@@ -1,14 +1,10 @@
-"""Step 4 (D3) — query the index: embed a question, k-NN search, return chunks.
+"""query the index: embed a question, k-NN search, return chunks.
 
 This is the online half of RAG. Given a question we:
   1. embed it with the SAME model used for the corpus (so they share a space),
   2. ask OpenSearch for the `k` nearest chunk vectors (HNSW approximate search),
   3. return each hit's score + stored fields (text/title/source) for display,
      downstream answer-generation, and citation.
-
-D4 reuses `search()` to compute recall@1/3/5 over Yang's hand-written eval set,
-so it returns structured hits, not printed text. The `__main__` block is just a
-smoke test you can eyeball.
 """
 
 from __future__ import annotations
@@ -27,7 +23,7 @@ def search(
 ) -> list[dict]:
     """Return the top-`k` chunks nearest to `query`.
 
-    `client`/`embedder` are injectable so callers (e.g. the D4 eval loop) can
+    `client`/`embedder` are injectable so callers can
     build them once and reuse across many queries instead of reloading the model
     per call.
 

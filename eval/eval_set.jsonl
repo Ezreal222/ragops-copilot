@@ -1,0 +1,20 @@
+{"q": "What is continuous batching in vLLM and what does it do?", "gold_chunk_ids": ["docs/serving/offline_inference.md::5", "docs/README.md::2"]}
+{"q": "What is PagedAttention and what problem does it solve?", "gold_chunk_ids": ["docs/design/paged_attention.md::0"]}
+{"q": "How do I run a quantized model with vLLM?", "gold_chunk_ids": ["docs/features/quantization/README.md::0"]}
+{"q": "How do I measure throughput, TTFT, and p99 latency in vLLM?", "gold_chunk_ids": ["docs/benchmarking/cli.md::7", "docs/benchmarking/cli.md::0"]}
+{"q": "How does prefix caching help repeated long-document queries?", "gold_chunk_ids": ["docs/features/automatic_prefix_caching.md::0", "docs/features/automatic_prefix_caching.md::1"]}
+{"q": "How do I use LoRA adapters with vLLM?", "gold_chunk_ids": ["docs/features/lora.md::0"]}
+{"q": "How do I run distributed inference across multiple GPUs with tensor parallelism?", "gold_chunk_ids": ["docs/serving/parallelism_scaling.md::1", "docs/serving/parallelism_scaling.md::3"]}
+{"q": "How do I start vLLM's OpenAI-compatible API server?", "gold_chunk_ids": ["docs/serving/online_serving/openai_compatible_server.md::0", "docs/getting_started/quickstart.md::17"]}
+{"q": "What is speculative decoding and how do I use it in vLLM?", "gold_chunk_ids": ["docs/features/speculative_decoding/README.md::0"]}
+{"q": "How do I get structured JSON outputs (guided decoding) from vLLM?", "gold_chunk_ids": ["docs/features/structured_outputs.md::0"]}
+{"q": "How do I enable tool / function calling in vLLM?", "gold_chunk_ids": ["docs/features/tool_calling.md::0"]}
+{"q": "How do I run offline batched inference with the LLM class?", "gold_chunk_ids": ["docs/serving/offline_inference.md::0", "docs/getting_started/quickstart.md::9"]}
+{"q": "How do I pass image / multimodal inputs to a model in vLLM?", "gold_chunk_ids": ["docs/features/multimodal_inputs.md::0"]}
+{"q": "How can I reduce GPU memory usage and avoid out-of-memory errors?", "gold_chunk_ids": ["docs/configuration/conserving_memory.md::0"]}
+{"q": "What is sleep mode and how do I enable it?", "gold_chunk_ids": ["docs/features/sleep_mode.md::0", "docs/features/sleep_mode.md::3"]}
+{"q": "What is chunked prefill and is it enabled by default?", "gold_chunk_ids": ["docs/configuration/optimization.md::4", "docs/configuration/optimization.md::5"]}
+{"q": "How do I quantize a model to FP8 with llm-compressor?", "gold_chunk_ids": ["docs/features/quantization/llm_compressor/fp8.md::0"]}
+{"q": "What are the GPU requirements and how do I install vLLM with CUDA?", "gold_chunk_ids": ["docs/getting_started/installation/gpu.cuda.inc.md::0"]}
+{"q": "How do I set sampling parameters like temperature and top_p?", "gold_chunk_ids": ["docs/getting_started/quickstart.md::10", "docs/getting_started/quickstart.md::9"]}
+{"q": "How do I get reasoning / chain-of-thought outputs from reasoning models?", "gold_chunk_ids": ["docs/features/reasoning_outputs.md::0"]}

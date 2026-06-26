@@ -1,4 +1,4 @@
-"""Step 3 (D3) — embed every chunk and bulk-load it into OpenSearch.
+"""embed every chunk and bulk-load it into OpenSearch.
 
 Pipeline: read data/chunks.jsonl -> batch-embed the text on the GPU -> write all
 docs with the OpenSearch bulk API. Re-runnable: it recreates the index first, so
@@ -33,7 +33,7 @@ BULK_BATCH = 500
 
 
 def load_chunks(path: Path = CHUNKS_PATH) -> list[dict]:
-    """Read the JSONL produced by D2. One dict per line:
+    """Read the JSONL. One dict per line:
     {chunk_id, text, source, title, section}.
     """
     if not path.exists():
