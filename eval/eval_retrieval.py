@@ -37,6 +37,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.embeddings import Embedder  # noqa: E402
 from src.opensearch_client import get_client  # noqa: E402
+from src.reranker import Reranker  # noqa: E402
 from src.retrieve import search  # noqa: E402
 
 EVAL_PATH = REPO_ROOT / "eval" / "eval_set.jsonl"
@@ -58,42 +59,72 @@ def load_eval_set(path: Path = EVAL_PATH) -> list[dict]:
     return rows
 
 
-def evaluate(rows: list[dict]) -> dict:
-    """Retrieve for every question, return metrics + per-question records."""
+def evaluate(rows: list[dict], use_reranker: bool = False) -> dict:
+    """Retrieve for every question, return metrics + per-question records.
+
+    `use_reranker=False` is the bi-encoder baseline (D4); True adds the D5
+    cross-encoder rerank stage. The reranker is built once and injected so the
+    measured latency reflects steady-state serving, not a per-query model load.
+    """
     # Build heavy objects once and reuse — the whole point of search()'s
-    # injectable client/embedder.
+    # injectable client/embedder/reranker.
     embedder = Embedder()
     client = get_client()
+    reranker = Reranker() if use_reranker else None
 
     records = []
     latencies_ms = []
     for r in rows:
         t0 = perf_counter()
-        hits = search(r["q"], k=RETRIEVE_K, client=client, embedder=embedder)
+        hits = search(
+            r["q"],
+            k=RETRIEVE_K,
+            client=client,
+            embedder=embedder,
+            use_reranker=use_reranker,
+            reranker=reranker,
+        )
         latencies_ms.append((perf_counter() - t0) * 1000)
 
         retrieved_ids = [h["chunk_id"] for h in hits]
         gold = set(r["gold_chunk_ids"])
         # rank (1-based) of the first gold chunk in the result list, or None.
         rank = next((i for i, cid in enumerate(retrieved_ids, 1) if cid in gold), None)
+
+        # Document-level: did we surface the right DOC, ignoring which chunk of
+        # it? chunk_id is "path::N", so the doc is everything before "::". This
+        # is fairer to the reranker, which often promotes a sibling chunk of the
+        # gold doc over the exact gold chunk our labels happen to name.
+        gold_docs = {cid.split("::")[0] for cid in gold}
+        doc_rank = next(
+            (i for i, cid in enumerate(retrieved_ids, 1) if cid.split("::")[0] in gold_docs),
+            None,
+        )
         records.append(
             {
                 "q": r["q"],
                 "gold": r["gold_chunk_ids"],
                 "retrieved": retrieved_ids,
                 "first_gold_rank": rank,
+                "first_gold_doc_rank": doc_rank,
             }
         )
 
     # recall@k = (# questions whose first gold lands within top-k) / total.
+    # Computed both at chunk granularity (exact chunk_id) and doc granularity.
     n = len(records)
     recall = {
         k: sum(1 for rec in records if rec["first_gold_rank"] and rec["first_gold_rank"] <= k) / n
         for k in K_VALUES
     }
+    recall_doc = {
+        k: sum(1 for rec in records if rec["first_gold_doc_rank"] and rec["first_gold_doc_rank"] <= k) / n
+        for k in K_VALUES
+    }
     return {
         "n": n,
         "recall": recall,
+        "recall_doc": recall_doc,
         "latency_ms": {
             "mean": statistics.mean(latencies_ms),
             "median": statistics.median(latencies_ms),
@@ -103,13 +134,18 @@ def evaluate(rows: list[dict]) -> dict:
 
 
 def main() -> None:
-    rows = load_eval_set()
-    res = evaluate(rows)
+    # `--rerank` flips on the D5 cross-encoder stage so the same script produces
+    # both sides of the before/after comparison.
+    use_reranker = "--rerank" in sys.argv
+    mode = "bi-encoder + rerank" if use_reranker else "bi-encoder only (baseline)"
 
-    print(f"\neval set: {res['n']} questions  (retrieve top-{RETRIEVE_K})\n")
-    print("recall@k")
+    rows = load_eval_set()
+    res = evaluate(rows, use_reranker=use_reranker)
+
+    print(f"\neval set: {res['n']} questions  (retrieve top-{RETRIEVE_K})  | mode: {mode}\n")
+    print("recall@k       chunk-level   doc-level")
     for k in K_VALUES:
-        print(f"  recall@{k:<2} = {res['recall'][k]:.3f}")
+        print(f"  recall@{k:<2}     {res['recall'][k]:.3f}         {res['recall_doc'][k]:.3f}")
     lat = res["latency_ms"]
     print(f"\nlatency/query: mean {lat['mean']:.1f} ms | median {lat['median']:.1f} ms")
 

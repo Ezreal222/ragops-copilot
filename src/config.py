@@ -74,12 +74,37 @@ class IndexConfig:
 
 
 @dataclass(frozen=True)
-class RetrievalConfig:
-    """Query-time settings."""
+class RerankConfig:
+    """Cross-encoder reranker settings.
 
-    top_k: int = 5  # how many chunks k-NN returns (recall@k uses k=1/3/5)
+    A reranker re-scores (query, chunk) PAIRS with full cross-attention — far
+    more accurate than the bi-encoder's separate-vector cosine, but it can't be
+    pre-indexed, so we only run it on a small candidate set.
+
+    `model_name`: bge-reranker-base is the small/fast cross-encoder (~280 MB).
+    `use_fp16`: half precision ~2x faster on a CUDA GPU; ignored off CUDA (CPU
+    fp16 is slower, so reranker.py only enables it when a GPU is present).
+    """
+
+    model_name: str = "BAAI/bge-reranker-base"
+    use_fp16: bool = True
+
+
+@dataclass(frozen=True)
+class RetrievalConfig:
+    """Query-time settings.
+
+    Two-stage retrieval: the bi-encoder k-NN casts a wide net (top-N =
+    `rerank_top_n`), then the cross-encoder reranks those down to `top_k`.
+    `use_reranker` toggles stage 2 so we can run the D4-vs-D5 before/after.
+    """
+
+    top_k: int = 5  # how many chunks we ultimately return (recall@k uses k=1/3/5)
+    use_reranker: bool = False  # default off = pure bi-encoder (the D4 baseline)
+    rerank_top_n: int = 50  # stage-1 candidates fed to the reranker (the "N")
 
 
 EMBED = EmbeddingConfig()
 INDEX = IndexConfig()
+RERANK = RerankConfig()
 RETRIEVAL = RetrievalConfig()

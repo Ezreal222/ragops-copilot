@@ -12,6 +12,7 @@ from __future__ import annotations
 from src.config import INDEX, RETRIEVAL
 from src.embeddings import Embedder
 from src.opensearch_client import get_client
+from src.reranker import Reranker
 
 
 def search(
@@ -20,22 +21,33 @@ def search(
     *,
     client=None,
     embedder: Embedder | None = None,
+    use_reranker: bool = RETRIEVAL.use_reranker,
+    reranker: Reranker | None = None,
 ) -> list[dict]:
-    """Return the top-`k` chunks nearest to `query`.
+    """Return the top-`k` chunks for `query` (optionally reranked).
 
-    `client`/`embedder` are injectable so callers can
-    build them once and reuse across many queries instead of reloading the model
-    per call.
+    Two-stage when `use_reranker` is True:
+      1. bi-encoder k-NN casts a wide net — fetch top-N (`rerank_top_n`),
+      2. cross-encoder rescores those N pairs and keeps the top-`k`.
+    When False, it's the plain bi-encoder top-`k` (the baseline).
 
-    Each result: {score, chunk_id, title, source, section, text}.
+    `client`/`embedder`/`reranker` are injectable so callers can build them once
+    and reuse across many queries instead of reloading the models per call.
+
+    Each result: {score, chunk_id, title, source, section, text}, plus a
+    "rerank_score" field when reranking was applied.
     """
     client = client or get_client()
     embedder = embedder or Embedder()
 
+    # Stage 1 — bi-encoder recall. Fetch a wide candidate set when reranking,
+    # otherwise just the k we'll return.
+    fetch_k = RETRIEVAL.rerank_top_n if use_reranker else k
+
     qv = embedder.encode_query(query)
     body = {
-        "size": k,
-        "query": {"knn": {"embedding": {"vector": qv, "k": k}}},
+        "size": fetch_k,
+        "query": {"knn": {"embedding": {"vector": qv, "k": fetch_k}}},
         # Don't ship the 384-float embedding back over the wire — we only need
         # the human-readable fields for each hit.
         "_source": {"excludes": ["embedding"]},
@@ -55,7 +67,13 @@ def search(
                 "text": src["text"],
             }
         )
-    return hits
+
+    if not use_reranker:
+        return hits
+
+    # Stage 2 — cross-encoder precision. Rescore the N candidates, keep top-k.
+    reranker = reranker or Reranker()
+    return reranker.rerank(query, hits, k)
 
 
 if __name__ == "__main__":
