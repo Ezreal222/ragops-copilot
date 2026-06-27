@@ -104,7 +104,39 @@ class RetrievalConfig:
     rerank_top_n: int = 50  # stage-1 candidates fed to the reranker (the "N")
 
 
+@dataclass(frozen=True)
+class LLMConfig:
+    """Answer-generation (LLM) settings.
+
+    Provider-agnostic via the OpenAI-compatible chat API. DeepSeek and OpenAI
+    both speak this exact protocol, so switching providers is just swapping
+    `base_url` + `model` + `api_key_env` — no code change in generate.py.
+
+    Defaults target DeepSeek (the key we have now). To switch to OpenAI, set
+    provider="openai", base_url="" (uses the SDK's default endpoint),
+    model="gpt-4o-mini", api_key_env="OPENAI_API_KEY". Anthropic uses a
+    different SDK; generate.py raises a clear error pointing that out until we
+    wire it (the `anthropic` package is already installed for that day).
+
+    `temperature=0` makes generation as deterministic as possible — for a
+    grounded "answer only from the docs" assistant we want faithfulness, not
+    creativity. `max_tokens` caps answer length (cost + latency).
+    """
+
+    provider: str = "deepseek"  # "deepseek" | "openai" | "anthropic"
+    model: str = "deepseek-v4-pro"  # DeepSeek V4 (also available: deepseek-v4-flash)
+    base_url: str = "https://api.deepseek.com"  # OpenAI-compatible endpoint
+    api_key_env: str = "DEEPSEEK_API_KEY"  # which env var holds the key
+    # deepseek-v4-pro is a *thinking* model: its hidden reasoning tokens count
+    # against max_tokens too. Too small a budget gets eaten by reasoning, leaving
+    # an empty/truncated answer (finish_reason="length"), so keep headroom for
+    # reasoning + the visible answer.
+    max_tokens: int = 2048
+    temperature: float = 0.0
+
+
 EMBED = EmbeddingConfig()
 INDEX = IndexConfig()
 RERANK = RerankConfig()
 RETRIEVAL = RetrievalConfig()
+LLM = LLMConfig()
