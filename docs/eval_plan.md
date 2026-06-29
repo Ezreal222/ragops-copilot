@@ -1,103 +1,102 @@
-# Eval 方案设计（W5 蓝图）
+# Eval Plan (W5 Blueprint)
 
-> RAGOps Copilot · 第 5 周交付物 = **eval 指标表（前后对比）**。
-> 本文是 D2–D6 的施工蓝图：定指标 → 升级 eval set → 跑 baseline → ablation。
-> 一句话方法论：**定指标 → 标 eval set → 量 baseline → 每次只改一个变量 → 重测对比 → 决策。**
-
----
-
-## 0. 为什么这周最值钱
-
-W4 我们把检索"跑通"了，也量了 `recall@1/3/5`。但有两个洞还没补：
-
-1. **gold 标注太脆**。W4 的 gold 钉在概览 `::0` chunk 上，导致 chunk-level 和 doc-level 召回差一大截（见 README「Results」）——这个 gap 大半是**标注假象**，不是检索器真实能力。
-2. **只评了检索，没评生成**。"答案忠不忠于上下文（抗幻觉）""答得切不切题"完全没量化。
-
-这周就是把项目从"能跑"升级成"有可信度量"：补上**生成侧指标**，并把 gold 标注**从 chunk 级升级到文档级 + 多 gold**，让数字可信。
+> RAGOps Copilot · Week 5 deliverable = **eval metrics table (before/after)**.
+> This is the build blueprint for D2–D6: pick metrics → upgrade the eval set → run a baseline → ablate.
+> One-line methodology: **define metrics → label an eval set → measure a baseline → change one variable at a time → re-measure & compare → decide.**
 
 ---
 
-## 1. 指标选型（评什么、用什么工具）
+## 0. Why this is the highest-value week
 
-分两层评，缺一层都会"盲"：组件级定位问题出在哪，端到端反映用户体验。
+In W4 we got retrieval *working* and measured `recall@1/3/5`. Two gaps remain:
 
-| 维度 | 指标 | 评什么 | 工具 | 何时引入 |
+1. **The gold labels are brittle.** W4 pinned gold to the overview `::0` chunk, which made chunk-level and doc-level recall diverge sharply (see the README "Results"). Most of that gap is a **labeling artifact**, not the retriever's true ability.
+2. **We only evaluated retrieval, never generation.** "Is the answer faithful to the context (anti-hallucination)?" and "Is the answer on-topic?" are not quantified at all.
+
+This week upgrades the project from "it runs" to "it has trustworthy measurement": add **generation-side metrics**, and upgrade gold labels **from chunk-level to document-level + multi-gold** so the numbers are credible.
+
+---
+
+## 1. Metric selection (what we measure, with what tool)
+
+Evaluate at two layers — skipping either layer leaves you blind. Component-level pinpoints *where* a problem is; end-to-end reflects the user experience.
+
+| Layer | Metric | What it measures | Tool | Introduced |
 |---|---|---|---|---|
-| **检索** | `recall@1/3/5/10` | 该召回的 gold 有没有进 top-k（覆盖率） | 自己的 `eval/eval_retrieval.py`（已有） | W4 已有 |
-| **检索** | **Context Recall** | 回答所需的信息有没有被召回到上下文里（需 reference） | RAGAS | D3 |
-| **检索** | **Context Precision** | 召回的上下文相不相关、相关的排没排在前面 | RAGAS | D3 |
-| **生成** | **Faithfulness** | 答案是否**忠于检索到的上下文**（每个 claim 能否被 context 支持）→ 直接量化**抗幻觉** | RAGAS（+ D4 自写 LLM-as-judge 复现原理） | D3 / D4 |
-| **生成** | **Answer Relevancy** | 答案是否**切题**（答到点上，没跑偏/没注水） | RAGAS | D3 |
-| **运维** | 成本 / 延迟 | 每次 ablation 顺手记 token 成本与 query 延迟 | 手动 / 脚本计时 | 全周 |
+| **Retrieval** | `recall@1/3/5/10` | Did the gold land in the top-k (coverage)? | our own `eval/eval_retrieval.py` (exists) | W4 (done) |
+| **Retrieval** | **Context Recall** | Was the information needed to answer actually retrieved into the context? (needs `reference`) | RAGAS | D3 |
+| **Retrieval** | **Context Precision** | Is the retrieved context relevant, and is the relevant part ranked high? | RAGAS | D3 |
+| **Generation** | **Faithfulness** | Is the answer **faithful to the retrieved context** (every claim supported by context)? → directly quantifies **anti-hallucination** | RAGAS (+ self-written LLM-as-judge in D4 to reproduce the mechanics) | D3 / D4 |
+| **Generation** | **Answer Relevancy** | Is the answer **on-topic** (answers the point, no drift / no padding)? | RAGAS | D3 |
+| **Ops** | cost / latency | Record token cost and query latency alongside each ablation | manual / timing script | all week |
 
-**记忆法**：precision / recall 管**检索**，faithfulness / answer relevancy 管**生成**。
+**Mnemonic:** precision / recall govern **retrieval**; faithfulness / answer relevancy govern **generation**.
 
-**faithfulness 直觉**：把答案拆成若干 claim，逐条判断能否被检索到的 context 支持，**支持比例 = faithfulness**。
+**Faithfulness intuition:** decompose the answer into claims, judge each claim for whether the retrieved context supports it, and the **fraction supported = faithfulness**.
 
-**LLM-as-judge 的局限**（为什么 D4 还要自己写一遍）：用 LLM 当裁判**有成本、有偏差、不稳定**。缓解：固定 prompt + `temperature=0` + 多次取平均；并保留人工抽检。D4 自写一版是为了理解打分原理，不把 RAGAS 当黑箱。
+**Limits of "LLM-as-judge" metrics** (why D4 re-implements one by hand): using an LLM as the judge is **costly, biased, and unstable**. Mitigations: fixed prompt + `temperature=0` + average over multiple runs + keep a human spot-check. D4 writes one from scratch to understand the scoring mechanism instead of treating RAGAS as a black box.
 
 ---
 
-## 2. eval set 升级（接 W4 伏笔）
+## 2. Eval-set upgrade (paying off the W4 setup)
 
-W4 的 schema（仍保留，向后兼容）：
+W4 schema (kept, backward-compatible):
 
 ```jsonc
 {"q": "...", "gold_chunk_ids": ["docs/.../file.md::5", ...]}
 ```
 
-**升级后 schema**（D2 标注目标，目标 **30–50 题**）：
+**Upgraded schema** (the D2 labeling target, aiming for **30–50 questions**):
 
 ```jsonc
 {
   "q": "What is PagedAttention and what problem does it solve?",
-  "gold_doc_ids":   ["docs/design/paged_attention.md"],        // 文档级：答案在哪个/哪些文档里（多 gold）
-  "gold_chunk_ids": ["docs/design/paged_attention.md::0"],     // 可选：保留 chunk 级做对照
-  "reference": "PagedAttention is vLLM's attention algorithm that ... (一两句话参考答案)"  // RAGAS context recall / answer 类指标要用
+  "gold_doc_ids":   ["docs/design/paged_attention.md"],        // doc-level: which document(s) the answer lives in (multi-gold)
+  "gold_chunk_ids": ["docs/design/paged_attention.md::0"],     // optional: keep chunk-level for a finer-grained comparison
+  "reference": "PagedAttention is vLLM's attention algorithm that ... (a one- or two-sentence reference answer)"  // needed by RAGAS context recall / answer-side metrics
 }
 ```
 
-三处改动及理由：
+Three changes and why:
 
-1. **新增 `gold_doc_ids`（文档级、多 gold）**：W4 把 gold 钉死在单个 `::0` chunk 上，使 chunk-level recall 被低估。改成"答案落在哪些**文档**里"，更贴近真实检索目标，也消除"分块边界/重叠"带来的标注噪声。`gold_chunk_ids` 保留做细粒度对照。
-2. **新增 `reference`（参考答案，一两句话）**：RAGAS 的 context recall 和答案类指标需要一个 ground-truth 参考。**由 Yang 手写**——这是 eval set 的金标准，不交给模型生成。
-3. **扩到 30–50 题**：覆盖更多文档、更多问题类型（概念 / how-to / 配置 / 报错），让数字不被小样本噪声主导。
+1. **Add `gold_doc_ids` (document-level, multi-gold).** W4 pinned gold to a single `::0` chunk, which under-counted chunk-level recall. Switching to "which **documents** contain the answer" is closer to the real retrieval target and removes the labeling noise introduced by chunk boundaries / overlap. `gold_chunk_ids` stays as a fine-grained reference.
+2. **Add `reference` (a one- or two-sentence reference answer).** RAGAS context recall and the answer-side metrics need a ground-truth reference. References are written by hand — they are the gold standard of the eval set and are not generated by a model.
+3. **Grow to 30–50 questions.** Cover more documents and more question types (concept / how-to / config / error), so the numbers aren't dominated by small-sample noise.
 
-> 分工：**harness（脚本、schema、loader）我来搭；gold 标注和 reference 答案 Yang 手写。**
-> D2 会提供一个 `eval/find_chunks.py` 式的辅助脚本，帮 Yang 把候选文档/chunk 列出来，但最终 gold 由人定。
+> The gold labels and reference answers are authored by hand; the harness (scripts, schema, loader) is tooling around them. D2 adds a `find_chunks.py`-style helper to list candidate docs/chunks, but the final gold is decided by a human, not generated.
 
 ---
 
-## 3. 本周 ablation 计划（每次只动一个变量）
+## 3. Ablation plan for the week (change one variable at a time)
 
-ablation = 控制变量法：固定其它一切，只改一个旋钮，重测全套指标，看动了哪个数字。所有旋钮都集中在 `src/config.py`，便于复现。
+Ablation = controlled experiment: hold everything else fixed, change one knob, re-run the full metric suite, and see which number moved. All knobs live in `src/config.py` for reproducibility.
 
-| Ablation | 改的变量（`config.py`） | 固定不动 | 看哪些指标 | 排期 |
+| Ablation | Variable changed (`config.py`) | Held fixed | Metrics to watch | Day |
 |---|---|---|---|---|
-| **① chunking** | `ChunkConfig.chunk_size` / `chunk_overlap`（如 800/100 → 512/64、1200/150） | embedding、index、retrieval、prompt | recall@k + context recall/precision（注意：换分块要**重新 ingest 重建索引**） | **D5** |
-| **② 检索 / rerank** | `RetrievalConfig.top_k`、`rerank_top_n`、`use_reranker` 开/关 | 分块、embedding、index | recall@k + context precision + faithfulness + 延迟/成本 | **D6** |
+| **① chunking** | `ChunkConfig.chunk_size` / `chunk_overlap` (e.g. 800/100 → 512/64, 1200/150) | embedding, index, retrieval, prompt | recall@k + context recall/precision (note: changing chunking requires **re-ingesting and rebuilding the index**) | **D5** |
+| **② retrieval / rerank** | `RetrievalConfig.top_k`, `rerank_top_n`, `use_reranker` on/off | chunking, embedding, index | recall@k + context precision + faithfulness + latency/cost | **D6** |
 
-**呼应 W4 结论**：W4 发现 doc-level recall@5 已饱和（=1.00），reranker 在召回上没有提升空间、只能重排序——"召回已饱和时 reranker 不划算"。D6 在升级后的 eval set 上**复测**这个结论是否依然成立（更大/未饱和的标注下，rerank 可能重新变得有价值）。
+**Echoing the W4 conclusion:** W4 found doc-level recall@5 was already saturated (= 1.00), so the reranker had no recall headroom and could only re-order — "a reranker isn't worth it when recall is already saturated." D6 **re-tests** whether this still holds on the upgraded eval set (under larger / un-saturated labels, reranking may become valuable again).
 
 ---
 
-## 4. D2–D6 排期
+## 4. D2–D6 schedule
 
-| Day | 产出 | 依赖 |
+| Day | Output | Depends on |
 |---|---|---|
-| **D2** | 标 eval set：升级 schema，扩到 30–50 题，补 `gold_doc_ids` + `reference`（Yang 手写，我搭辅助脚本 + loader） | 本文 schema |
-| **D3** | 接 RAGAS，跑出**生成侧 baseline**：context precision/recall + faithfulness + answer relevancy | D2 的 eval set |
-| **D4** | 自写 **LLM-as-judge**（复现 faithfulness 打分原理，理解 RAGAS 黑箱） | D3 |
-| **D5** | **chunking ablation**（①）：size/overlap 对 eval 的影响 | D2–D3 |
-| **D6** | **检索 / rerank ablation**（②）：top-N / k / 用不用 rerank，**复测 W4 「rerank 不划算」结论** | D2–D3 |
+| **D2** | Label the eval set: upgrade the schema, grow to 30–50 questions, add hand-written `gold_doc_ids` + `reference`, backed by a helper script + loader | this doc's schema |
+| **D3** | Wire up RAGAS, produce the **generation-side baseline**: context precision/recall + faithfulness + answer relevancy | D2's eval set |
+| **D4** | Self-write an **LLM-as-judge** (reproduce the faithfulness scoring mechanics, de-blackbox RAGAS) | D3 |
+| **D5** | **chunking ablation** (①): effect of size/overlap on eval | D2–D3 |
+| **D6** | **retrieval / rerank ablation** (②): top-N / k / rerank-or-not, **re-test the W4 "rerank isn't worth it" conclusion** | D2–D3 |
 
-**完成判定（本周）**：产出一张 **eval 指标表（前后对比）**——baseline vs 各 ablation，覆盖检索 + 生成两层，并附成本/延迟。
+**Week completion criterion:** produce one **eval metrics table (before/after)** — baseline vs each ablation, covering both retrieval and generation layers, with cost/latency attached.
 
 ---
 
-## 5. 复现性约定
+## 5. Reproducibility conventions
 
-- 所有可调旋钮集中在 `src/config.py`（chunk / embed / index / retrieval / rerank / llm），ablation = 改一处。
-- eval set 固定在 `eval/eval_set.jsonl`，版本随仓库走。
-- 换分块 → 必须重建 OpenSearch 索引（ingest 幂等、可重跑）。
-- LLM 打分固定 `temperature=0`，必要时多次取平均，记录用的是哪个 provider/model（当前 DeepSeek `deepseek-v4-pro`）。
+- All tunable knobs live in `src/config.py` (chunk / embed / index / retrieval / rerank / llm); an ablation = a one-spot change.
+- The eval set is fixed at `eval/eval_set.jsonl` and versioned with the repo.
+- Changing chunking → must rebuild the OpenSearch index (ingest is idempotent and re-runnable).
+- LLM scoring uses fixed `temperature=0`, averages over multiple runs when needed, and records which provider/model was used (currently DeepSeek `deepseek-v4-pro`).
