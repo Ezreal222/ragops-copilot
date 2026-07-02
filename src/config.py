@@ -13,15 +13,18 @@ class ChunkConfig:
 
     Units are CHARACTERS (RecursiveCharacterTextSplitter measures length with
     `len` by default). Embeddings ultimately count tokens, but for English prose
-    ~1 token ≈ 4 chars, so 800 chars ≈ 200 tokens — a sane starting point for
-    technical docs.
+    ~1 token ≈ 4 chars, so 1200 chars ≈ 300 tokens.
 
-    Starting values: 800 / 100  (~12% overlap). The overlap
+    Values: 1200 / 200 (~17% overlap). These come from the W5 D5 chunking
+    ablation (eval/ablation_chunking.py): sweeping size/overlap against the eval
+    set, 1200/200 gave the best context_recall (0.69→0.79) AND context_precision
+    (0.69→0.76) vs the old 800/100 baseline — larger chunks carry enough
+    surrounding context to answer without losing retrieval precision. The overlap
     keeps an answer that straddles a chunk boundary from being lost.
     """
 
-    chunk_size: int = 800
-    chunk_overlap: int = 100
+    chunk_size: int = 1200
+    chunk_overlap: int = 200
 
 
 # The single instance the pipeline imports. Change values here (or override at

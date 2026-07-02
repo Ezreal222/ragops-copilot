@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.config import CHUNK
+from src.config import CHUNK, ChunkConfig
 from src.ingestion.chunk import chunk_docs
 from src.ingestion.loader import REPO_ROOT, load_docs
 
@@ -26,13 +26,17 @@ from src.ingestion.loader import REPO_ROOT, load_docs
 CHUNKS_PATH = REPO_ROOT / "data" / "chunks.jsonl"
 
 
-def build_chunks(out_path: Path = CHUNKS_PATH) -> Path:
+def build_chunks(out_path: Path = CHUNKS_PATH, config: ChunkConfig = CHUNK) -> Path:
     """Load -> chunk -> write JSONL. Returns the output path.
+
+    `config` selects the chunk_size/overlap (defaults to src.config.CHUNK). The
+    chunking ablation (W5 D5) passes a different ChunkConfig per group to
+    re-materialize the corpus without touching the module default.
 
     Overwrites `out_path` so the run is idempotent.
     """
     docs = load_docs()
-    chunks = chunk_docs(docs)
+    chunks = chunk_docs(docs, config)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:
