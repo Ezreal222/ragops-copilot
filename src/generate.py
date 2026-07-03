@@ -182,14 +182,18 @@ def ask(
         "retrieved_chunks": [ ...search() hit dicts ], # everything fed as context
       }
     """
-    # Stages 1+2 — always rerank here: ask() is the production answer path, and
-    # showed rerank improves ranking precision (better top-k for the LLM).
+    # Stages 1+2 — retrieve, reranking only if the config asks for it. The W5 D6
+    # ablation (eval/ablation_retrieval.py) measured the cross-encoder reranker
+    # LOSING on every metric here (recall@1 0.59->0.44, context_precision/recall
+    # and faithfulness all down) at 5x the latency — on this near-saturated doc
+    # corpus its reordering hurts more than it helps. So the production default is
+    # RETRIEVAL.use_reranker = False; flip that flag to re-enable it.
     chunks = search(
         question,
         k=k,
         client=os_client,
         embedder=embedder,
-        use_reranker=True,
+        use_reranker=RETRIEVAL.use_reranker,
         reranker=reranker,
     )
 

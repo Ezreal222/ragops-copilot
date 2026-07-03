@@ -23,6 +23,7 @@ def search(
     embedder: Embedder | None = None,
     use_reranker: bool = RETRIEVAL.use_reranker,
     reranker: Reranker | None = None,
+    rerank_top_n: int | None = None,
 ) -> list[dict]:
     """Return the top-`k` chunks for `query` (optionally reranked).
 
@@ -33,6 +34,9 @@ def search(
 
     `client`/`embedder`/`reranker` are injectable so callers can build them once
     and reuse across many queries instead of reloading the models per call.
+    `rerank_top_n` overrides the config's stage-1 candidate count for a single
+    call — used by the W5 D6 ablation to sweep N (20/50/100); defaults to
+    RETRIEVAL.rerank_top_n.
 
     Each result: {score, chunk_id, title, source, section, text}, plus a
     "rerank_score" field when reranking was applied.
@@ -42,7 +46,7 @@ def search(
 
     # Stage 1 — bi-encoder recall. Fetch a wide candidate set when reranking,
     # otherwise just the k we'll return.
-    fetch_k = RETRIEVAL.rerank_top_n if use_reranker else k
+    fetch_k = (rerank_top_n or RETRIEVAL.rerank_top_n) if use_reranker else k
 
     qv = embedder.encode_query(query)
     body = {

@@ -99,12 +99,25 @@ class RetrievalConfig:
 
     Two-stage retrieval: the bi-encoder k-NN casts a wide net (top-N =
     `rerank_top_n`), then the cross-encoder reranks those down to `top_k`.
-    `use_reranker` toggles stage 2 so we can run the D4-vs-D5 before/after.
+    `use_reranker` toggles stage 2.
+
+    Values come from the W5 D6 retrieval/rerank ablation
+    (eval/ablation_retrieval.py), run on the D5 best chunking (1200/200):
+      - `use_reranker=False`: the reranker LOST on every metric — recall@1
+        0.59->0.44, context_precision 0.78->0.70, context_recall 0.79->0.70,
+        faithfulness 0.84->0.79 — at 5-8x the latency (19ms->94/146ms). On this
+        near-saturated doc corpus its reordering hurts more than it helps
+        (a stronger repeat of the W4 finding). A clean negative result: off.
+      - `top_k=5`: the balanced default. Best context_precision (0.777) at half
+        the token cost of k=10. k=10 measurably lifts coverage (recall@k
+        0.844->0.969) and end-to-end faithfulness/answer_relevancy, but at ~2x
+        context tokens and lower precision — kept as a documented "recall-max"
+        option, not the default (n=32, so the quality gains sit within noise).
     """
 
-    top_k: int = 5  # how many chunks we ultimately return (recall@k uses k=1/3/5)
-    use_reranker: bool = False  # default off = pure bi-encoder (the D4 baseline)
-    rerank_top_n: int = 50  # stage-1 candidates fed to the reranker (the "N")
+    top_k: int = 5  # chunks fed to the LLM; 10 = recall-max at ~2x token cost
+    use_reranker: bool = False  # D6 ablation: reranker worse on every metric here
+    rerank_top_n: int = 50  # stage-1 candidates if reranking is re-enabled (the "N")
 
 
 @dataclass(frozen=True)
