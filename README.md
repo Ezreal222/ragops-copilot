@@ -92,6 +92,9 @@ Two ablation studies turned retrieval quality into **decisions**, measured with 
 temperature 0) over an upgraded, **document-level** eval set (multi-gold references; 32 answerable
 questions). Every study changes **one variable at a time** so each metric delta is attributable.
 
+> **Full write-up:** [`docs/eval_report.md`](docs/eval_report.md) — method, RAGAS baseline,
+> custom-judge agreement, both ablations, the reranker negative result, and the recommended config.
+
 **Chunking (D5).** Sweeping chunk_size/overlap, **1200/200** beat the old 800/100 baseline on
 *both* context_recall (0.69 → 0.79) and context_precision (0.69 → 0.76) while shrinking the index
 (2,700 → 1,783 chunks). Adopted as the corpus default. (`eval/ablation_chunking.csv`)
