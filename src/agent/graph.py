@@ -34,21 +34,29 @@ import os
 from dotenv import load_dotenv
 from langchain_core.messages import SystemMessage
 from langchain_openai import ChatOpenAI
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from src.agent.tools import search_docs
+from src.agent.tools import compare, list_sources, search_docs
 from src.config import LLM, LLMConfig
 from src.generate import SYSTEM_PROMPT
 
 # Load .env so the provider key is available. Safe to call repeatedly.
 load_dotenv()
 
-# The tools this agent may call. D2 = just retrieval; D3 adds list_sources /
-# compare / estimate_cost. Kept as one list so both the LLM binding and the
-# ToolNode use the exact same set (a mismatch = the model calls a tool the node
-# can't run).
-TOOLS = [search_docs]
+# The tools this agent may call. D3 = retrieval + list_sources + compare (the
+# last drives genuine multi-step). Kept as one list so both the LLM binding and
+# the ToolNode use the exact same set (a mismatch = the model calls a tool the
+# node can't run).
+TOOLS = [search_docs, list_sources, compare]
+
+# Runaway-loop cap — the safety valve D2's 5x-search run motivated. A ReAct LLM
+# can get stuck calling tools without converging, burning tokens/latency; this
+# bounds how many agent<->tools super-steps one invoke may take, passed as
+# LangGraph's `recursion_limit` (its default is 25). A proper AgentConfig plus a
+# graceful "forced answer on cap" lands in D4; here hitting it just stops.
+RECURSION_LIMIT = 8
 
 
 def get_chat_model(config: LLMConfig = LLM) -> ChatOpenAI:
@@ -146,16 +154,31 @@ def print_trace(messages: list) -> None:
 
 if __name__ == "__main__":
     #   uv run python -m src.agent.graph
-    # Live end-to-end test (makes real LLM calls). Expect:
-    #   - the technical question: LLM calls search_docs once, then a cited answer
-    #   - the coffee question: it searches, sees nothing relevant, and refuses
+    # Live MULTI-STEP test (makes real LLM calls). Expect the agent to PLAN
+    # implicitly — pick a tool, read the result, maybe call another — rather than
+    # answer in one shot. recursion_limit is passed so a non-converging loop
+    # can't run away.
     app = build_graph()
-    for q in [
-        "How does vLLM do continuous batching?",
-        "Can vLLM make coffee?",  # not in the docs -> should refuse
-    ]:
+    questions = [
+        "Compare continuous batching and PagedAttention in vLLM.",  # -> compare / 2x search + synthesis
+        "What docs cover quantization?",                            # -> list_sources
+    ]
+    for q in questions:
         print(f"\n########## {q}")
-        result = app.invoke({"messages": [("user", q)]})
+        try:
+            result = app.invoke(
+                {"messages": [("user", q)]},
+                {"recursion_limit": RECURSION_LIMIT},
+            )
+        except GraphRecursionError:
+            print(f"  [hit recursion_limit={RECURSION_LIMIT}] safety valve stopped a runaway loop")
+            continue
+
+        # How many turns actually requested tools = how "multi-step" this was.
+        tool_rounds = sum(
+            1 for m in result["messages"] if getattr(m, "tool_calls", None)
+        )
         print_trace(result["messages"])
-        print("\n  --- FINAL ANSWER ---")
+        print(f"\n  steps (tool-call rounds): {tool_rounds}")
+        print("  --- FINAL ANSWER ---")
         print(" ", result["messages"][-1].content)
