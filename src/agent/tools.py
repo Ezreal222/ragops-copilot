@@ -22,9 +22,14 @@ with a distinct docstring** — overlapping semantics would make it choose wrong
 
 from __future__ import annotations
 
-from langchain_core.tools import tool
+import functools
+import time
 
-from src.config import RETRIEVAL
+from langchain_core.tools import tool
+from opensearchpy.exceptions import ConnectionError as OSConnectionError
+from opensearchpy.exceptions import ConnectionTimeout
+
+from src.config import AGENT, RETRIEVAL
 from src.embeddings import Embedder
 from src.generate import format_context
 from src.opensearch_client import get_client
@@ -51,7 +56,91 @@ def _resources():
     return _embedder, _os_client
 
 
+# --- D4 guardrail 2: tools must survive transient failures, and NEVER crash the
+# graph. Two layers below:
+#   (a) _search_with_retry — retry the retrieval call on *transient* errors only,
+#       with linear backoff. Retrying a deterministic error (bad query) is
+#       pointless, so we only catch the connection/timeout family.
+#   (b) @safe_tool — a backstop that converts ANY exception escaping a tool into a
+#       readable observation string. Principle: a tool failure becomes something
+#       the LLM can READ and route around ("docs unavailable -> tell the user"),
+#       not a traceback that kills the whole agent run.
+
+# Transient = worth retrying: OpenSearch down / wrong port / slow (exactly the D4
+# fault-injection case). NOT here: RequestError (malformed query, 400) — that's
+# deterministic, retrying just wastes time. (429/503 could be added later by
+# inspecting TransportError.status_code.)
+_TRANSIENT_ERRORS = (OSConnectionError, ConnectionTimeout)
+
+
+def _search_with_retry(*args, **kwargs) -> list[dict]:
+    """Call retrieve.search(), retrying only transient failures with backoff.
+
+    Makes up to `1 + AGENT.tool_max_retries` attempts; sleeps
+    `attempt * tool_retry_backoff_s` between them (linear backoff — enough to
+    ride out a container restart without hammering). Re-raises the last transient
+    error if all attempts fail; `@safe_tool` turns that into an observation.
+    """
+    attempts = AGENT.tool_max_retries + 1
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return search(*args, **kwargs)
+        except _TRANSIENT_ERRORS as exc:
+            last_exc = exc
+            if attempt < attempts:
+                time.sleep(AGENT.tool_retry_backoff_s * attempt)
+    raise last_exc  # exhausted retries; safe_tool will catch and report it
+
+
+def safe_tool(fn):
+    """Wrap a tool so it NEVER raises out of the graph (D4 guardrail 2 backstop).
+
+    Any exception escaping `fn` — retries exhausted, or an unexpected bug — is
+    caught and returned as a "TOOL ERROR: ..." observation. The LLM reads that
+    like any other tool result and can degrade honestly ("I can't reach the
+    docs") instead of the agent crashing. `functools.wraps` keeps fn's name,
+    docstring and signature so LangChain's `@tool` still builds the right schema.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except _TRANSIENT_ERRORS as exc:
+            return (
+                f"TOOL ERROR: the vLLM docs search service is unavailable "
+                f"({type(exc).__name__}) after retries. Tell the user you "
+                f"can't reach the documentation right now; do not fabricate an answer."
+            )
+        except Exception as exc:  # last-resort backstop — never let it hit the graph
+            return (
+                f"TOOL ERROR: '{fn.__name__}' failed unexpectedly "
+                f"({type(exc).__name__}). Do not retry it; tell the user the "
+                f"lookup failed and you can't answer reliably."
+            )
+
+    return wrapper
+
+
+# --- D4 guardrail 3: low-score refusal ---------------------------------------
+def _below_threshold(chunks: list[dict]) -> bool:
+    """True if retrieval found nothing clearing the relevance bar.
+
+    Pure k-NN always returns top-k, so "no chunks" almost never happens — the
+    real "miss" signal is a low BEST score. We gate on the top-1 score (the most
+    relevant hit): if even that is below AGENT.min_relevance_score, everything
+    retrieved is noise, so the tool should report "not found" and let the LLM
+    refuse rather than ground an answer on irrelevant text. Threshold basis: see
+    AgentConfig.min_relevance_score / eval/analyze_score_threshold.py.
+    """
+    if not chunks:
+        return True
+    return max(c["score"] for c in chunks) < AGENT.min_relevance_score
+
+
 @tool
+@safe_tool
 def search_docs(query: str) -> str:
     """Search the vLLM documentation for excerpts relevant to a query.
 
@@ -75,7 +164,7 @@ def search_docs(query: str) -> str:
     # Same retrieval the fixed RAG pipeline uses: bi-encoder k-NN, rerank off
     # (per the W5 D6 ablation). top_k comes from config so the agent and the
     # fixed pipeline stay in lockstep.
-    chunks = search(
+    chunks = _search_with_retry(
         query,
         k=RETRIEVAL.top_k,
         client=client,
@@ -83,10 +172,15 @@ def search_docs(query: str) -> str:
         use_reranker=RETRIEVAL.use_reranker,
     )
 
-    if not chunks:
-        # Give the model an explicit signal rather than an empty string, so it
-        # can honestly refuse instead of guessing. (Hard fallback wiring is D4.)
-        return "No relevant excerpts found in the vLLM docs for this query."
+    if _below_threshold(chunks):
+        # No chunk clears the relevance bar -> treat as "not in the docs" and
+        # give the model an explicit refuse signal, rather than feeding it
+        # top-k noise it might stitch into a confident-but-wrong answer.
+        return (
+            "No sufficiently relevant excerpts found in the vLLM docs for this "
+            "query (best match below the relevance threshold). Treat this as: "
+            "the answer is not in the docs — refuse rather than guess."
+        )
 
     # Reuse the exact numbered format the D6 generator feeds the LLM, so a
     # citation [n] in the answer maps to excerpt n here — consistent across the
@@ -112,6 +206,7 @@ _LIST_SOURCES_K = 20
 
 
 @tool
+@safe_tool
 def list_sources(topic: str) -> str:
     """List the vLLM documentation pages that discuss a given topic.
 
@@ -129,7 +224,7 @@ def list_sources(topic: str) -> str:
         relevant pages first — or a note that no page covers the topic.
     """
     embedder, client = _resources()
-    chunks = search(
+    chunks = _search_with_retry(
         topic, k=_LIST_SOURCES_K, client=client, embedder=embedder,
         use_reranker=False,
     )
@@ -150,6 +245,7 @@ def list_sources(topic: str) -> str:
 
 
 @tool
+@safe_tool
 def compare(concept_a: str, concept_b: str) -> str:
     """Retrieve documentation for TWO vLLM concepts for a side-by-side comparison.
 
@@ -168,13 +264,20 @@ def compare(concept_a: str, concept_b: str) -> str:
         sequence — or a note if neither concept is found in the docs.
     """
     embedder, client = _resources()
-    a = search(concept_a, k=RETRIEVAL.top_k, client=client, embedder=embedder,
-               use_reranker=False)
-    b = search(concept_b, k=RETRIEVAL.top_k, client=client, embedder=embedder,
-               use_reranker=False)
+    a = _search_with_retry(concept_a, k=RETRIEVAL.top_k, client=client,
+                           embedder=embedder, use_reranker=False)
+    b = _search_with_retry(concept_b, k=RETRIEVAL.top_k, client=client,
+                           embedder=embedder, use_reranker=False)
 
-    if not a and not b:
-        return "No relevant excerpts found in the vLLM docs for either concept."
+    # Apply the same relevance bar per concept; a concept whose best hit is below
+    # threshold is treated as "not in the docs". If neither concept clears it,
+    # there's nothing worth comparing -> refuse.
+    if _below_threshold(a) and _below_threshold(b):
+        return (
+            "No sufficiently relevant excerpts found in the vLLM docs for either "
+            "concept (both below the relevance threshold). Treat this as: not in "
+            "the docs — refuse rather than guess."
+        )
 
     # Continuous numbering: A gets [1..len(a)], B continues from len(a)+1.
     parts = [

@@ -121,6 +121,47 @@ class RetrievalConfig:
 
 
 @dataclass(frozen=True)
+class AgentConfig:
+    """Agent guardrail knobs (W6 D4).
+
+    The agent hands control to a free-running LLM, so it needs *deterministic*
+    safety edges around that freedom. Each field is one guardrail from the D4
+    spec; they're gathered here (not scattered as literals in graph.py/tools.py)
+    for the same reason the RAG knobs are — one place to see and tune the
+    reliability posture.
+
+    - `recursion_limit`: max agent<->tools super-steps per question, passed as
+      LangGraph's `recursion_limit` (its own default is 25). Bounds a
+      non-converging ReAct loop — the D2 "LLM called search_docs 5x" motivation.
+      Hitting it is handled gracefully (a fallback answer), not by crashing.
+
+    - `tool_max_retries` / `tool_retry_backoff_s`: guardrail 2. On a *transient*
+      tool failure (OpenSearch unreachable / timeout) a tool retries this many
+      extra times with linear backoff before giving up; deterministic errors
+      (e.g. a malformed query) are NOT retried. When retries are exhausted the
+      tool still doesn't raise — it returns a readable error the LLM can act on.
+
+    - `min_relevance_score`: guardrail 3. Pure k-NN always returns top-k, so an
+      off-topic question still gets chunks back; if the BEST chunk scores below
+      this, the tool treats retrieval as "nothing relevant" and refuses instead
+      of grounding on noise. Assumes the bi-encoder cosine score (reranker off,
+      the prod default). Basis — eval/analyze_score_threshold.py over the 36-Q
+      eval set: on-topic top-1 min 0.834 / median 0.917; off-topic top-1 median
+      0.793 / max 0.854. 0.82 sits just under the on-topic minimum (0 false
+      refusals on the eval set) and above the off-topic median. It favors recall
+      (a false refusal is worse UX, and the system-prompt refusal + citation
+      guardrail catch residual noise), so the lone off-topic outlier at 0.854
+      that clears it is acceptable. OpenSearch lucene cosinesimil scores live in
+      0.5 (orthogonal) .. 1.0 (identical).
+    """
+
+    recursion_limit: int = 8
+    tool_max_retries: int = 2  # extra attempts after the first, on transient errors
+    tool_retry_backoff_s: float = 0.3  # linear backoff: wait attempt*this between tries
+    min_relevance_score: float = 0.82  # below this top-1 score -> refuse (eval-derived)
+
+
+@dataclass(frozen=True)
 class LLMConfig:
     """Answer-generation (LLM) settings.
 
@@ -155,4 +196,5 @@ EMBED = EmbeddingConfig()
 INDEX = IndexConfig()
 RERANK = RerankConfig()
 RETRIEVAL = RetrievalConfig()
+AGENT = AgentConfig()
 LLM = LLMConfig()
