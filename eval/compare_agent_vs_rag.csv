@@ -1,0 +1,6 @@
+metric,rag,agent,delta
+faithfulness,0.7228,0.6954,-0.0273
+answer_relevancy,0.6973,0.6392,-0.0582
+context_precision,0.7760,0.5255,-0.2505
+context_recall,0.7083,0.6157,-0.0926
+refusal_acc,0.8333,0.7778,-0.0556

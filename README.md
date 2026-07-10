@@ -15,8 +15,10 @@ LLM application and making it efficient.
 ![Architecture](docs/architecture.svg)
 
 - **① Offline ingestion** — vLLM docs → chunk → embed → index in OpenSearch.
-- **② Online query** — question → semantic retrieval → (rerank) → LLM generation with citations.
-- **③ Eval harness** (side) and **④ Serving / MLOps** (outer) are subsequent phases.
+- **② Online query** — question → `answer()` unified entrypoint → semantic retrieval → (rerank) →
+  LLM generation with citations. An **agent** tool loop (LangGraph ReAct + guardrails) is wired as
+  an alternate engine behind the `use_agent` switch (default off — see [Results (W6 agent)](#results-w6-agent)).
+- **③ Eval harness** (side) covers recall@k, RAGAS, and agent eval. **④ Serving / MLOps** (outer) is the next phase.
 
 ## Design decisions
 
@@ -49,7 +51,7 @@ notebooks/   exploration
 |---|---|
 | **1 · Retrieval** ✅ | Ingest → chunk → embed → OpenSearch → semantic retrieval → **recall@1/3/5** + cross-encoder reranker + end-to-end LLM answers with citations. **Done (W4)** — see [Results](#results-w4-retrieval-baseline). |
 | **2 · Evaluation** ✅ | RAGAS (faithfulness / answer relevancy / context precision-recall) + LLM-as-judge + chunking & retrieval/rerank ablations. **Done (W5)** — see [Results](#results-w5-evaluation--tuning). |
-| **3 · Agent** | LangGraph planning + tool loop + guardrails. |
+| **3 · Agent** ✅ | LangGraph ReAct tool loop (`search_docs` / `list_sources` / `compare`) + guardrails (step cap, tool retry/fallback, low-score refusal, citation check) + agent eval + a unified `answer()` entrypoint with a `use_agent` degrade switch. **Done (W6)** — see [Results](#results-w6-agent). |
 | **4 · Serving & MLOps** | FastAPI · Docker · AWS · monitoring (latency / cost / failure rate) · CI/CD. |
 
 ## Results (W4 retrieval baseline)
@@ -128,6 +130,39 @@ The quality–latency–cost triangle in one table: every knob (k, rerank, N) mo
 cost/latency together; the production config is the highest-quality point **under the cost/latency
 budget**, not the maximum on any single metric.
 
+## Results (W6 agent)
+
+W6 turns the fixed pipeline into an **agent**: a LangGraph ReAct loop where the LLM *decides*
+which tool to call (`search_docs`, `list_sources`, `compare`) instead of always retrieving once.
+Four **guardrails** keep the free-running loop safe — a step cap with graceful fallback, tool
+retry/`safe_tool` backstop, a relevance-score refusal threshold, and an output citation check. An
+**agent eval** set (10 tasks) scores not just the answer but the *process* (tool choice, steps,
+degradation).
+
+A unified entrypoint **`src/answer.py :: answer()`** routes every question to the agent *or* the
+fixed pipeline via `SERVING.use_agent`, returning one shape
+(`{answer, citations, tool_trace, steps, contexts, mode, degraded}`) for the frontend / eval / monitoring.
+
+**Regression before trusting the agent as default** (`eval/compare_agent_vs_rag.py`, both engines
+over the 36-question eval set, RAGAS judge = DeepSeek `deepseek-v4-flash`, temp 0):
+
+| metric | fixed RAG | agent | Δ (agent−rag) |
+|---|---|---|---|
+| faithfulness | 0.723 | 0.695 | −0.027 |
+| answer_relevancy | 0.697 | 0.639 | −0.058 |
+| context_precision | 0.776 | 0.525 | **−0.251** |
+| context_recall | 0.708 | 0.616 | −0.093 |
+| refusal_acc | 0.833 | 0.778 | −0.056 |
+
+- A **tool-use-policy** prompt fix (retrieve once, then answer — no reworded re-searches) cut the
+  agent's average tool-call rounds **8.0 → 2.8** and non-convergence from 3/3 (smoke) to **8/36**.
+- **Decision:** the agent reaches near-parity on faithfulness / answer_relevancy / refusal_acc
+  (~0.03–0.06, within noise at n=36) but **still degrades** on context_precision (−0.25) and leaves
+  **22% of questions** at the step-cap fallback. So the runtime default stays **`use_agent=False`**
+  (fixed RAG); the agent is the architectural entrypoint but ships **behind the flag** until
+  convergence improves — regression-driven progressive rollout: *if it degrades, you don't flip the
+  default.* (`eval/compare_agent_vs_rag.csv`)
+
 ## How to run
 
 Prerequisites: **Python 3.11**, [`uv`](https://docs.astral.sh/uv/), and Docker (for the local
@@ -158,6 +193,13 @@ uv run python -m eval.run_ragas                 # RAGAS four-metric baseline
 uv run python -m eval.ablation_chunking         # chunk_size/overlap sweep → ablation_chunking.csv
 uv run python -m eval.ablation_retrieval        # top_k / rerank / top_N sweep → ablation_retrieval.csv
 uv run python -m eval.ablation_retrieval --no-ragas   # doc-recall + latency only (fast, no API cost)
+
+# 6. agent (W6): unified entrypoint + agent tool loop + regression vs fixed RAG
+uv run python -m src.answer                     # unified answer() — agent vs fixed RAG on one query
+uv run python -m src.agent.graph                # live agent trace (tool loop + guardrail fault injection)
+uv run python -m eval.eval_agent                # agent task success / tool-selection accuracy
+uv run python -m eval.compare_agent_vs_rag --smoke 3   # regression wiring check (3 Qs)
+uv run python -m eval.compare_agent_vs_rag      # full 36-Q agent-vs-RAG RAGAS comparison
 ```
 
 ## Success criterion

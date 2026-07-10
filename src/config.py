@@ -192,9 +192,38 @@ class LLMConfig:
     temperature: float = 0.0
 
 
+@dataclass(frozen=True)
+class ServingConfig:
+    """System-level serving knobs (W6 D6) — how the unified entrypoint answers.
+
+    `use_agent` is the single routing switch for src.answer.answer():
+      - True : route every question through the agent (run_agent) — the LLM decides
+        which tool(s) to call, so simple lookups and multi-step compares share one
+        path. This is the W6 architectural direction: an agentic RAG system.
+      - False (default): use the fixed retrieve->rerank->generate pipeline (ask()).
+
+    Keeping it a config flag (not a code fork) is the production **degrade switch**:
+    the agent path exists and is the strategic entrypoint, but the RUNTIME default
+    stays on the stable fixed pipeline — the basics of progressive rollout.
+
+    Why default False (not True as D6 step 1 first set it): the D6 regression
+    (eval/compare_agent_vs_rag.py, 36-Q) measured the agent NOT at parity with
+    fixed RAG — context_precision 0.78->0.53 and 8/36 questions still hit the
+    step-cap fallback (non-convergence), even after the D6 tool-use-policy fix cut
+    avg tool calls 8.0->2.8. faithfulness/answer_relevancy/refusal_acc came within
+    ~0.03-0.06 (noise), but 22% degraded answers is a real UX regression. So we do
+    NOT flip the default to the agent yet: ship fixed RAG, keep the agent behind
+    the flag until convergence improves. "Changing the architecture needs a
+    regression test, and if it degrades you don't flip the default" — the lesson.
+    """
+
+    use_agent: bool = False
+
+
 EMBED = EmbeddingConfig()
 INDEX = IndexConfig()
 RERANK = RerankConfig()
 RETRIEVAL = RetrievalConfig()
 AGENT = AgentConfig()
 LLM = LLMConfig()
+SERVING = ServingConfig()

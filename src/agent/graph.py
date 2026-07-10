@@ -63,6 +63,29 @@ FALLBACK_ANSWER = (
     "rephrasing the question or narrowing it to a more specific vLLM topic."
 )
 
+# D6 convergence fix — the agent's system prompt = the shared grounding/citation
+# rules (SYSTEM_PROMPT) PLUS a tool-use POLICY. Why a separate prompt: the D5
+# agent eval and the D6 regression both showed the agent *non-converging* on
+# simple questions — it fired search_docs repeatedly with reworded queries (often
+# two in parallel per turn), burned the recursion_limit, and then refused an
+# answerable question. The fixed RAG pipeline answers the same questions fine
+# because it retrieves ONCE and commits. This policy makes the agent behave that
+# way by default: retrieve once, then ANSWER. We keep it OUT of generate.py's
+# SYSTEM_PROMPT so the fixed-RAG regression baseline is unchanged (a fair compare).
+AGENT_SYSTEM_PROMPT = SYSTEM_PROMPT + (
+    "\n\nTool-use policy (follow exactly):\n"
+    "- For a normal question, call `search_docs` EXACTLY ONCE, then answer from "
+    "the returned excerpts, citing each claim with [n]. One retrieval is enough.\n"
+    "- Do NOT re-search with reworded queries to gather more — commit to an answer "
+    "from what the first search returned. Prefer answering over searching again.\n"
+    "- Issue tool calls ONE AT A TIME (never several search calls in parallel).\n"
+    "- Only make a second tool call if the first returned NO relevant excerpts; "
+    "then either try one alternative query, or refuse with the exact 'not found' "
+    "sentence. Never exceed a couple of tool calls.\n"
+    "- Use `compare` (once) for two-concept comparisons and `list_sources` (once) "
+    'for "which docs cover X?" — same one-shot rule.'
+)
+
 
 def get_chat_model(config: LLMConfig = LLM) -> ChatOpenAI:
     """Build a LangChain chat model for the configured provider.
@@ -105,12 +128,14 @@ def build_graph(config: LLMConfig = LLM):
     def agent_node(state: MessagesState) -> dict:
         """Reason step: run the LLM over the conversation so far.
 
-        We prepend the D6 system prompt fresh each turn (kept OUT of the
+        We prepend the AGENT system prompt fresh each turn (kept OUT of the
         accumulated state) so every LLM call — the first decision and the final
-        answer after tool results — obeys the same grounded/cited/refuse rules.
+        answer after tool results — obeys the same grounded/cited/refuse rules
+        PLUS the D6 tool-use policy (retrieve once, then answer) that keeps the
+        agent from non-converging on simple questions.
         Returns the new AIMessage; the `add_messages` reducer appends it.
         """
-        messages = [SystemMessage(content=SYSTEM_PROMPT)] + state["messages"]
+        messages = [SystemMessage(content=AGENT_SYSTEM_PROMPT)] + state["messages"]
         return {"messages": [llm_with_tools.invoke(messages)]}
 
     def should_continue(state: MessagesState) -> str:
