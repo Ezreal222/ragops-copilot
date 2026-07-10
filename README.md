@@ -143,6 +143,9 @@ A unified entrypoint **`src/answer.py :: answer()`** routes every question to th
 fixed pipeline via `SERVING.use_agent`, returning one shape
 (`{answer, citations, tool_trace, steps, contexts, mode, degraded}`) for the frontend / eval / monitoring.
 
+> **Full write-up:** [`docs/agent.md`](docs/agent.md) — the ReAct graph, tool list, all four
+> guardrails (with the 0.82 threshold basis), the agent eval table, and a multi-step trace demo.
+
 **Regression before trusting the agent as default** (`eval/compare_agent_vs_rag.py`, both engines
 over the 36-question eval set, RAGAS judge = DeepSeek `deepseek-v4-flash`, temp 0):
 
