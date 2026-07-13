@@ -56,6 +56,27 @@ def _resources():
     return _embedder, _os_client
 
 
+def preload_resources(embedder: Embedder | None = None, os_client=None):
+    """Build (or inject) the tool resources NOW, instead of on the first tool call.
+
+    Lazy-on-first-use is right for a script but wrong for a server: the first
+    user request would otherwise pay the bge model load (~seconds) inside its own
+    latency. The API's startup hook (src/api/deps.py) calls this so that cost
+    lands at boot and every request is warm.
+
+    Injecting also lets the API share ONE embedder / OpenSearch client between the
+    agent path (which reads these module globals) and the fixed-RAG path (which
+    takes them as arguments) — otherwise the process would hold two copies of the
+    same model.
+    """
+    global _embedder, _os_client
+    if embedder is not None:
+        _embedder = embedder
+    if os_client is not None:
+        _os_client = os_client
+    return _resources()
+
+
 # --- D4 guardrail 2: tools must survive transient failures, and NEVER crash the
 # graph. Two layers below:
 #   (a) _search_with_retry — retry the retrieval call on *transient* errors only,

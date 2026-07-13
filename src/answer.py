@@ -86,6 +86,7 @@ def answer(
     question: str,
     *,
     use_agent: bool | None = None,
+    k: int | None = None,
     serving: ServingConfig = SERVING,
     config: LLMConfig = LLM,
     agent_config: AgentConfig = AGENT,
@@ -99,6 +100,10 @@ def answer(
 
     Routing: `use_agent` (explicit arg) wins if given, else `serving.use_agent`.
     This is the one function the frontend / eval / monitoring should call.
+
+    `k` (chunks retrieved) applies to the FIXED-RAG path only; on the agent path
+    the tools own their own top_k (they read RETRIEVAL.top_k directly), so a
+    per-request k there would be a lie. None = the configured RETRIEVAL.top_k.
 
     Heavy objects are injectable so a caller answering many questions (the eval
     harness) builds them once. They apply to whichever path is chosen:
@@ -134,6 +139,7 @@ def answer(
     # pipeline runs it — the two should be near-equivalent.
     r = ask(
         question,
+        **({"k": k} if k is not None else {}),  # else ask()'s default = RETRIEVAL.top_k
         os_client=os_client,
         embedder=embedder,
         reranker=reranker,

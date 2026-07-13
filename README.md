@@ -38,7 +38,8 @@ bge-reranker (cross-encoder) · DeepSeek (generation, OpenAI-compatible) · RAGA
 ## Repo layout
 
 ```
-src/         ingestion (load/clean/chunk/embed) + retrieval + generation
+src/         ingestion (load/clean/chunk/embed) + retrieval + generation + agent
+src/api/     FastAPI service — /ask, /health, startup preloading
 eval/        eval set + metric scripts (recall@k)
 data/        corpus + index data — GITIGNORED
 docs/        architecture diagram, design notes
@@ -52,7 +53,7 @@ notebooks/   exploration
 | **1 · Retrieval** ✅ | Ingest → chunk → embed → OpenSearch → semantic retrieval → **recall@1/3/5** + cross-encoder reranker + end-to-end LLM answers with citations. **Done (W4)** — see [Results](#results-w4-retrieval-baseline). |
 | **2 · Evaluation** ✅ | RAGAS (faithfulness / answer relevancy / context precision-recall) + LLM-as-judge + chunking & retrieval/rerank ablations. **Done (W5)** — see [Results](#results-w5-evaluation--tuning). |
 | **3 · Agent** ✅ | LangGraph ReAct tool loop (`search_docs` / `list_sources` / `compare`) + guardrails (step cap, tool retry/fallback, low-score refusal, citation check) + agent eval + a unified `answer()` entrypoint with a `use_agent` degrade switch. **Done (W6)** — see [Results](#results-w6-agent). |
-| **4 · Serving & MLOps** | FastAPI · Docker · AWS · monitoring (latency / cost / failure rate) · CI/CD. |
+| **4 · Serving & MLOps** | **FastAPI ✅ (W7 D1)** — `/ask` + `/health`, Swagger, startup preloading, latency instrumentation. Next: Docker · AWS · monitoring (latency / cost / failure rate) · CI/CD. |
 
 ## Results (W4 retrieval baseline)
 
@@ -203,7 +204,27 @@ uv run python -m src.agent.graph                # live agent trace (tool loop + 
 uv run python -m eval.eval_agent                # agent task success / tool-selection accuracy
 uv run python -m eval.compare_agent_vs_rag --smoke 3   # regression wiring check (3 Qs)
 uv run python -m eval.compare_agent_vs_rag      # full 36-Q agent-vs-RAG RAGAS comparison
+
+# 7. serve (W7): the whole system as an HTTP API
+uv run uvicorn src.api.main:app --reload --port 8000
+#    → interactive docs (Swagger): http://localhost:8000/docs
+curl localhost:8000/health
+curl -X POST localhost:8000/ask -H 'Content-Type: application/json' \
+  -d '{"question":"What is PagedAttention and what problem does it solve?"}'
 ```
+
+### The API
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /ask` | `{question, use_agent?, k?}` → `{answer, citations, tool_trace, steps, mode, degraded, latency_ms}`. Grounded and cited; refuses when the docs don't cover the question. |
+| `GET /health` | Readiness probe: is OpenSearch reachable, is the index non-empty, is the embedder loaded. Returns `503` when not ready. |
+
+Heavy objects (embedder, OpenSearch client, LLM client, agent graph) are built **once** in the
+lifespan startup hook and reused across requests — preloading costs ~1.8 s at boot and removes
+~4.2 s of construction (plus a ~0.5 s first-encode CUDA warm-up) from every request. `use_agent`
+defaults to the server's config (`SERVING.use_agent`), so the W6 degrade switch still governs
+routing. Every request logs `mode / steps / degraded / refused / citations / latency_ms`.
 
 ## Success criterion
 
