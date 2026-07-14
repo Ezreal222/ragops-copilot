@@ -53,7 +53,7 @@ notebooks/   exploration
 | **1 · Retrieval** ✅ | Ingest → chunk → embed → OpenSearch → semantic retrieval → **recall@1/3/5** + cross-encoder reranker + end-to-end LLM answers with citations. **Done (W4)** — see [Results](#results-w4-retrieval-baseline). |
 | **2 · Evaluation** ✅ | RAGAS (faithfulness / answer relevancy / context precision-recall) + LLM-as-judge + chunking & retrieval/rerank ablations. **Done (W5)** — see [Results](#results-w5-evaluation--tuning). |
 | **3 · Agent** ✅ | LangGraph ReAct tool loop (`search_docs` / `list_sources` / `compare`) + guardrails (step cap, tool retry/fallback, low-score refusal, citation check) + agent eval + a unified `answer()` entrypoint with a `use_agent` degrade switch. **Done (W6)** — see [Results](#results-w6-agent). |
-| **4 · Serving & MLOps** | **FastAPI ✅ (W7 D1)** — `/ask` + `/health`, Swagger, startup preloading, latency instrumentation. Next: Docker · AWS · monitoring (latency / cost / failure rate) · CI/CD. |
+| **4 · Serving & MLOps** | **FastAPI ✅ (W7 D1)** — `/ask` + `/health`, Swagger, startup preloading, latency instrumentation. **Docker ✅ (W7 D2)** — multi-stage image (2.53 GB, CPU torch, non-root) + `docker compose up` for API&nbsp;+&nbsp;OpenSearch. Next: AWS · monitoring (latency / cost / failure rate) · CI/CD. |
 
 ## Results (W4 retrieval baseline)
 
@@ -169,6 +169,39 @@ over the 36-question eval set, RAGAS judge = DeepSeek `deepseek-v4-flash`, temp 
 
 ## How to run
 
+### Quickstart: the whole system in one command (Docker)
+
+Prerequisites: Docker with the **compose** and **buildx** plugins
+(`sudo apt install docker-compose-v2 docker-buildx` on Ubuntu), plus a `.env` holding your
+`DEEPSEEK_API_KEY`. Nothing else — no Python, no `uv`, no GPU.
+
+```bash
+cp .env.example .env          # then edit: DEEPSEEK_API_KEY
+
+docker compose up -d --build  # OpenSearch + the API (~20s)
+
+# A fresh cluster has no index, so /health honestly reports 503 until the corpus
+# is loaded. Ingestion is idempotent — safe to re-run.
+docker compose exec api python -m src.ingest      # ~90s on CPU (1783 chunks)
+
+curl -s localhost:8000/health | jq                # → status "ok", indexed_chunks 1783
+curl -s -X POST localhost:8000/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"What is PagedAttention?"}' | jq
+#    → interactive docs (Swagger): http://localhost:8000/docs
+```
+
+The image is **2.53 GB** and runs as a non-root user. It installs the **CPU** build of torch
+(`uv sync --group cpu`), so it ships no CUDA wheels, while a bare `uv sync` on the host still gets
+the GPU build. That costs ~2ms per query — invisible beside the ~6s LLM call — but makes bulk ingest
+~6× slower, which is why ingest is the one step worth running on a GPU. Model weights are **not**
+baked into the image: bge-small downloads on first start into a cached volume.
+
+Secrets are injected at run time from `.env` (which is in both `.gitignore` and `.dockerignore`) and
+never enter an image layer.
+
+### From source (development, GPU)
+
 Prerequisites: **Python 3.11**, [`uv`](https://docs.astral.sh/uv/), and Docker (for the local
 OpenSearch index). Runs on Linux/WSL or macOS; uses a CUDA GPU when available, otherwise CPU.
 
@@ -177,7 +210,7 @@ OpenSearch index). Runs on Linux/WSL or macOS; uses a CUDA GPU when available, o
 uv sync
 
 # copy the env template and fill in your keys
-cp .env.example .env        # then edit: DEEPSEEK_API_KEY, OPENSEARCH_PASSWORD
+cp .env.example .env        # then edit: DEEPSEEK_API_KEY
 
 # 1. ingest: load & clean vLLM docs → chunk → embed → bulk-index in OpenSearch (idempotent)
 uv run python -m src.ingest

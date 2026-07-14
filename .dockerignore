@@ -1,0 +1,45 @@
+# What NOT to send to the Docker daemon as build context.
+#
+# Everything listed here would otherwise be uploaded on every build and (worse)
+# risk being baked into a layer. Two reasons it matters:
+#
+#   1. Speed — the context is tarred and shipped to the daemon before the build
+#      even starts. `.venv` alone is 5.3 GB.
+#   2. Safety — `COPY . .` copies whatever is in context. `.env` holds the
+#      DeepSeek key, and a key copied into a layer is extractable by anyone who
+#      pulls the image, forever, even if a later layer deletes it (layers are
+#      append-only). Keys are injected at RUN time as env vars instead — see
+#      docker-compose.yml.
+
+# --- Secrets: never, under any circumstances, in an image layer ---
+.env
+
+# --- The host venv: 5.3 GB of CUDA torch, and built against the HOST's python ---
+# The image builds its own CPU-only venv from uv.lock. Copying this one in would
+# be both enormous and broken.
+.venv/
+
+# --- Corpus / index / model caches: mounted as volumes at runtime, not baked ---
+data/
+
+# --- VCS + local tooling ---
+.git/
+.gitignore
+.dockerignore
+
+# --- Python noise ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- Not needed to SERVE: exploration, eval harness, docs, personal brief ---
+notebooks/
+eval/
+docs/
+CLAUDE.md
+
+# --- The build's own recipes ---
+Dockerfile
+docker-compose.yml

@@ -1,0 +1,115 @@
+# RAGOps Copilot — the whole system, one command (W7 D2).
+#
+#   docker compose up -d --build                    # OpenSearch + the API
+#   docker compose exec api python -m src.ingest    # fill a fresh, empty index
+#   curl localhost:8000/health
+#
+# The point of this file is REPRODUCIBILITY: anyone (a new laptop, a CI runner, a
+# reviewer) gets the identical two-service system without a README full of manual
+# `docker run` incantations. Until today OpenSearch was a hand-started container
+# with no volume — its index lived in the container's writable layer and would
+# have died with it. Fixed below.
+
+services:
+  # ===========================================================================
+  # opensearch — the vector store (k-NN index over the vLLM doc chunks)
+  # ===========================================================================
+  opensearch:
+    # Pinned to the exact version the index was built with, NOT `:latest`.
+    # `latest` is a moving tag: a rebuild months from now could pull a new major,
+    # change k-NN behaviour, and quietly invalidate every measurement in this
+    # repo. Pinning is what makes "reproducible" actually true.
+    image: opensearchproject/opensearch:3.7.0
+    container_name: ragops-opensearch
+    environment:
+      # One node, no cluster election — correct for local/dev, and the reason we
+      # never hang "waiting for other nodes".
+      - discovery.type=single-node
+      # Dev-only: turns off TLS + auth, so the client connects over plain http
+      # with no credentials — which is exactly what src/opensearch_client.py does.
+      # A real deployment MUST NOT do this; the managed AWS cluster later will
+      # have security on. This is a local convenience, not a pattern to copy.
+      - DISABLE_SECURITY_PLUGIN=true
+      # Cap the JVM heap. Left alone, OpenSearch sizes its heap from the HOST's
+      # total RAM and can balloon; 512 MB is ample for ~2.7k vectors.
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    ulimits:
+      # OpenSearch refuses to start (or degrades badly) under default limits: it
+      # wants its heap locked into RAM rather than swapped out by the OS, and it
+      # opens many file handles per shard.
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    ports:
+      # Published to the HOST so you can still run the eval scripts and a GPU
+      # `uv run python -m src.ingest` from the 5080 against this same cluster.
+      # The api container does NOT go through this — see its OPENSEARCH_HOST.
+      - "9200:9200"
+    volumes:
+      # The index now survives `docker compose down` and container replacement.
+      # A named volume rather than a bind mount: docker owns it, so the
+      # container's internal uid writes to it without host-permission fights.
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      # The readiness contract that the api service waits on. Cluster health
+      # answers 200 only once the node actually accepts queries — much later than
+      # "the process started", which is all docker itself can observe. On a single
+      # node the status is usually `yellow` (replicas cannot be assigned with one
+      # node), which is healthy for us, so we only assert that it responds.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12          # ~2 min of grace: the JVM + k-NN plugin boot slowly
+      start_period: 30s
+
+  # ===========================================================================
+  # api — the FastAPI service, built from our Dockerfile
+  # ===========================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ragops-copilot:latest
+    container_name: ragops-api
+    environment:
+      # ⚠ THE CLASSIC CONTAINER-NETWORKING TRAP ⚠
+      # NOT http://localhost:9200. Every container has its own network namespace,
+      # so inside `api`, `localhost` means the api container ITSELF — where
+      # nothing listens on 9200 and the connection is refused.
+      # On a compose network, services address each other by SERVICE NAME:
+      # compose runs a DNS resolver that maps `opensearch` to that container's IP.
+      # This is also why src/opensearch_client.py reads OPENSEARCH_HOST from the
+      # env instead of hardcoding IndexConfig.host — the same code runs on the
+      # host (localhost:9200) and in the container (opensearch:9200), unchanged.
+      - OPENSEARCH_HOST=http://opensearch:9200
+    env_file:
+      # Secrets are INJECTED AT RUN TIME, never baked at build time. .env holds
+      # DEEPSEEK_API_KEY, and it is in BOTH .dockerignore and .gitignore, so it
+      # reaches neither an image layer nor git. This matters because image layers
+      # are append-only and readable by anyone who can pull the image: a key
+      # COPY'd in and deleted in a later layer is still trivially recoverable.
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      # 1) The corpus. `docker compose exec api python -m src.ingest` reads
+      #    data/chunks.jsonl, and the image has no copy of it (data/ is in
+      #    .dockerignore — a corpus does not belong inside an image). Mounted
+      #    read-only, because ingestion only ever reads it.
+      - ./data:/app/data:ro
+      # 2) The model weights. bge-small (~130 MB) is deliberately NOT baked into
+      #    the image; it downloads on first start into HF_HOME. Caching that in a
+      #    named volume means the download happens ONCE, not on every restart.
+      - hf-cache:/home/app/.cache/huggingface
+    depends_on:
+      opensearch:
+        # Not a bare `depends_on: [opensearch]` — that waits only for the
+        # container to be CREATED, which for a JVM that needs ~30s to become
+        # queryable is nearly useless: api would boot, fail to reach OpenSearch,
+        # and start serving 503s. `service_healthy` waits for the healthcheck
+        # above to pass. Startup ORDER is not readiness.
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  opensearch-data:
+  hf-cache:

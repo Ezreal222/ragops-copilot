@@ -22,3 +22,53 @@ dependencies = [
     "sentence-transformers>=5.6.0",
     "uvicorn>=0.51.0",
 ]
+
+# --- PyTorch: one lockfile, two hardware targets (W7 D2) -----------------------
+#
+# torch arrives as a transitive dep of sentence-transformers, and PyPI's default
+# Linux wheel is the CUDA build: torch + ~37 `nvidia-*` packages, a 5.3 GB venv.
+# That is exactly what we want on the 5080 (GPU embedding) and exactly what we do
+# NOT want in the Docker image, which runs embedding on CPU — hundreds of MB of
+# CUDA kernels that can never execute, in every layer we build, push and pull.
+#
+# So we declare torch explicitly and give it two mutually exclusive sources:
+#   gpu -> the cu130 wheel index    (matches the host's torch 2.12.1+cu130;
+#                                    Blackwell / sm_120 needs CUDA 13)
+#   cpu -> the CPU-only wheel index (~200 MB, no nvidia-* at all)
+#
+# `conflicts` tells uv these can never be resolved together, so it locks a
+# separate resolution for each — the lockfile still pins every version and hash,
+# and both the host and the image install with `--frozen`. Reproducibility is
+# intact; only the hardware target differs.
+#
+# `default-groups = ["gpu"]` keeps the host workflow unchanged: a bare `uv sync` /
+# `uv run` still gets GPU torch. The Dockerfile opts out explicitly:
+#     uv sync --frozen --no-default-groups --group cpu
+[dependency-groups]
+# Pinned exactly, not `>=`: the two groups must describe the SAME torch, differing
+# only in build. It also keeps the host on the version already proven on the 5080
+# instead of silently upgrading it the next time we relock.
+cpu = ["torch==2.12.1"]
+gpu = ["torch==2.12.1"]
+
+[tool.uv]
+default-groups = ["gpu"]
+conflicts = [[{ group = "cpu" }, { group = "gpu" }]]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", group = "cpu" },
+    { index = "pytorch-cu130", group = "gpu" },
+]
+
+# `explicit = true` = "only use this index for packages explicitly routed to it
+# above". Without it, uv would search these indexes for every package in the tree.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
