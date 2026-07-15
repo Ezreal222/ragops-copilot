@@ -509,7 +509,7 @@
         <textarea
           id="q"
           rows="1"
-          placeholder="How does vLLM do continuous batching?"
+          placeholder="How does vLLM manage the KV cache?"
           autocomplete="off"
           spellcheck="false"
           aria-label="Your question about vLLM"
@@ -531,7 +531,7 @@
   <div class="examples">
     <span class="lbl">Try</span>
     <button class="chip" type="button">What is PagedAttention?</button>
-    <button class="chip" type="button">How does vLLM do continuous batching?</button>
+    <button class="chip" type="button">How does tensor parallelism work in vLLM?</button>
     <button class="chip" type="button">What quantization methods does vLLM support?</button>
     <button class="chip" type="button">Does vLLM support Kubernetes autoscaling on Mars?</button>
   </div>
@@ -588,6 +588,22 @@
     return String(s).replace(/[&<>"']/g, (c) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     }[c]));
+  }
+
+  // The backend cites a repo-relative markdown path (e.g.
+  // "docs/design/paged_attention.md") — that's the corpus's own identifier, not
+  // something a visitor can open. The official site renders those same files at
+  // docs.vllm.ai/en/latest/ with MkDocs "pretty" URLs (drop .md, trailing
+  // slash; a folder's README.md is that folder's index). Map path -> URL here so
+  // every citation links to the real, public doc page.
+  function docsUrl(source) {
+    const BASE = "https://docs.vllm.ai/en/latest/";
+    if (!source) return BASE;
+    let p = String(source).replace(/^docs\//, "").replace(/\.inc\.md$/, ".md");
+    if (p === "README.md") return BASE;
+    if (p.endsWith("/README.md")) p = p.slice(0, -"README.md".length); // section -> dir/
+    else p = p.replace(/\.md$/, "/"); // page -> pretty URL
+    return BASE + p;
   }
 
   // Turn the answer's [n] markers into clickable citation pills, and split on
@@ -678,7 +694,7 @@
           <div class="n">${c.n}</div>
           <div class="meta">
             <div class="title">${esc(c.title || "Untitled")}</div>
-            <a class="url" href="${esc(c.source)}" target="_blank" rel="noopener">${esc(c.source)}</a>
+            <a class="url" href="${esc(docsUrl(c.source))}" target="_blank" rel="noopener">${esc(docsUrl(c.source).replace(/^https:\/\//, ""))} ↗</a>
           </div>
         </div>`
       )
