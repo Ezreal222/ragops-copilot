@@ -1,0 +1,765 @@
+<!--
+  RAGOps Copilot — public demo frontend (W7 D3).
+
+  ONE self-contained page. Caddy serves this file at / and reverse-proxies
+  /ask and /health to the FastAPI container on the SAME origin, so the fetch()
+  calls below need no CORS and no API base URL — just relative paths.
+
+  Design: an "instrument panel" for a grounded RAG service. The answer is not a
+  chat bubble; it arrives with a telemetry strip (mode / steps / latency) and
+  citation markers [n] wired to their source cards. Amber = the live signal
+  (query caret, citations, focus). Teal = grounded/verified state.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+  rel="stylesheet"
+/>
+
+<style>
+  :root {
+    --bg: #0f141b;
+    --bg-2: #0c1017;
+    --panel: #171e28;
+    --panel-2: #1b2532;
+    --line: #263240;
+    --line-soft: #1f2937;
+    --ink: #eaf0f7;
+    --muted: #8195a9;
+    --muted-2: #5f7185;
+    --amber: #ffb454;
+    --amber-dim: #c98a3f;
+    --teal: #43d9ad;
+    --red: #ff6b6b;
+
+    --font-display: "Space Grotesk", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+    --maxw: 860px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    /* faint schematic grid — the "blueprint" underlay, kept very low contrast */
+    background-image:
+      linear-gradient(rgba(38, 50, 64, 0.25) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(38, 50, 64, 0.25) 1px, transparent 1px);
+    background-size: 48px 48px;
+    background-position: center top;
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.65;
+    min-height: 100vh;
+  }
+
+  a { color: var(--amber); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 32px 20px 96px;
+  }
+
+  /* ---- Masthead ------------------------------------------------------- */
+  header { padding: 24px 0 8px; }
+
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .brand .mark {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 26px;
+    letter-spacing: -0.02em;
+  }
+  .brand .mark .op { color: var(--amber); }
+  .brand .tag {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+  .thesis {
+    margin: 18px 0 0;
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: clamp(20px, 3.6vw, 30px);
+    line-height: 1.25;
+    letter-spacing: -0.015em;
+    max-width: 22ch;
+  }
+  .thesis .verified { color: var(--teal); }
+  .subthesis {
+    margin: 10px 0 0;
+    color: var(--muted);
+    font-size: 15px;
+    max-width: 54ch;
+  }
+
+  /* ---- Console (the hero interaction) --------------------------------- */
+  .console {
+    margin-top: 28px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background:
+      linear-gradient(180deg, var(--panel), var(--bg-2));
+    box-shadow: 0 24px 60px -32px rgba(0, 0, 0, 0.8);
+    overflow: hidden;
+  }
+  .console-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line-soft);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--muted-2);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .console-bar .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--line);
+  }
+  .console-bar .dot.live { background: var(--teal); box-shadow: 0 0 8px var(--teal); }
+  .console-bar .spacer { flex: 1; }
+
+  form { display: block; }
+  .field {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 18px 16px;
+  }
+  .field .caret {
+    font-family: var(--font-mono);
+    color: var(--amber);
+    font-size: 18px;
+    line-height: 1.5;
+    user-select: none;
+    padding-top: 2px;
+  }
+  textarea#q {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.5;
+    resize: none;
+    min-height: 28px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  textarea#q::placeholder { color: var(--muted-2); }
+
+  .console-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 16px 16px 44px;
+    flex-wrap: wrap;
+  }
+  button.ask {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 0.01em;
+    color: #1a1206;
+    background: var(--amber);
+    border: none;
+    border-radius: 8px;
+    padding: 9px 18px;
+    cursor: pointer;
+    transition: transform 0.08s ease, background 0.15s ease, opacity 0.15s ease;
+  }
+  button.ask:hover { background: #ffc06e; }
+  button.ask:active { transform: translateY(1px); }
+  button.ask:disabled { opacity: 0.5; cursor: not-allowed; }
+  .hint {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--muted-2);
+  }
+  .hint kbd {
+    font-family: var(--font-mono);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* engine toggle — small, honest control */
+  .toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  .toggle input { position: absolute; opacity: 0; pointer-events: none; }
+  .toggle .track {
+    width: 34px; height: 18px; border-radius: 999px;
+    background: var(--line); position: relative;
+    transition: background 0.15s ease;
+    flex: none;
+  }
+  .toggle .track::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--muted); transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .toggle input:checked + .track { background: rgba(67, 217, 173, 0.35); }
+  .toggle input:checked + .track::after { transform: translateX(16px); background: var(--teal); }
+  .toggle input:focus-visible + .track { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+  /* ---- Example chips -------------------------------------------------- */
+  .examples {
+    margin-top: 18px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .examples .lbl {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted-2);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .chip {
+    font-family: var(--font-body);
+    font-size: 13.5px;
+    color: var(--muted);
+    background: var(--panel);
+    border: 1px solid var(--line-soft);
+    border-radius: 999px;
+    padding: 6px 13px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  }
+  .chip:hover { color: var(--ink); border-color: var(--amber-dim); }
+
+  /* ---- Result --------------------------------------------------------- */
+  #result { margin-top: 34px; }
+  [hidden] { display: none !important; }
+
+  /* telemetry strip — the gauge cluster */
+  .telemetry {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--panel);
+    flex-wrap: wrap;
+  }
+  .gauge {
+    flex: 1 1 0;
+    min-width: 96px;
+    padding: 12px 16px;
+    border-right: 1px solid var(--line-soft);
+  }
+  .gauge:last-child { border-right: none; }
+  .gauge .k {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted-2);
+  }
+  .gauge .v {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 20px;
+    margin-top: 3px;
+    letter-spacing: -0.01em;
+  }
+  .gauge .v small {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--muted);
+  }
+  .badge {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 6px;
+    letter-spacing: 0.03em;
+  }
+  .badge.rag { color: var(--teal); background: rgba(67, 217, 173, 0.12); border: 1px solid rgba(67, 217, 173, 0.3); }
+  .badge.agent { color: var(--amber); background: rgba(255, 180, 84, 0.12); border: 1px solid rgba(255, 180, 84, 0.3); }
+  .badge.degraded { color: var(--red); background: rgba(255, 107, 107, 0.12); border: 1px solid rgba(255, 107, 107, 0.3); }
+
+  /* the answer body */
+  .answer {
+    margin-top: 20px;
+    font-size: 17px;
+    line-height: 1.72;
+  }
+  .answer p { margin: 0 0 14px; }
+  .answer p:last-child { margin-bottom: 0; }
+
+  /* inline citation pill [n] — the signature link between claim and source */
+  .cite {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--amber);
+    background: rgba(255, 180, 84, 0.1);
+    border: 1px solid rgba(255, 180, 84, 0.28);
+    border-radius: 5px;
+    padding: 0 5px;
+    margin: 0 1px;
+    cursor: pointer;
+    vertical-align: 1px;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .cite:hover, .cite:focus-visible {
+    background: var(--amber);
+    color: #1a1206;
+    outline: none;
+  }
+
+  /* sources / evidence panel */
+  .sources { margin-top: 30px; }
+  .sources h3 {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted-2);
+    margin: 0 0 12px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .sources h3::after {
+    content: ""; flex: 1; height: 1px; background: var(--line-soft);
+  }
+  .source {
+    display: flex;
+    gap: 14px;
+    padding: 14px 16px;
+    border: 1px solid var(--line-soft);
+    border-radius: 10px;
+    margin-bottom: 10px;
+    background: var(--panel);
+    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+    scroll-margin-top: 20px;
+  }
+  .source.lit {
+    border-color: var(--amber);
+    background: var(--panel-2);
+    box-shadow: 0 0 0 1px var(--amber-dim), 0 8px 30px -14px rgba(255, 180, 84, 0.4);
+  }
+  .source .n {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--amber);
+    flex: none;
+    width: 26px; height: 26px;
+    display: grid; place-items: center;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+  }
+  .source .meta { min-width: 0; }
+  .source .title {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 15px;
+    color: var(--ink);
+    margin-bottom: 2px;
+  }
+  .source .url {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+    word-break: break-all;
+  }
+
+  /* refusal — honest, not an error */
+  .refusal {
+    margin-top: 20px;
+    border: 1px solid rgba(129, 149, 169, 0.4);
+    border-left: 3px solid var(--muted);
+    border-radius: 8px;
+    padding: 16px 18px;
+    background: var(--panel);
+    color: var(--muted);
+    font-size: 15.5px;
+  }
+  .refusal strong { color: var(--ink); font-weight: 600; }
+
+  /* error — a real failure */
+  .error {
+    margin-top: 20px;
+    border: 1px solid rgba(255, 107, 107, 0.4);
+    border-left: 3px solid var(--red);
+    border-radius: 8px;
+    padding: 16px 18px;
+    background: rgba(255, 107, 107, 0.06);
+    font-size: 15px;
+  }
+  .error strong { color: var(--red); }
+
+  /* ---- Loading -------------------------------------------------------- */
+  .loading {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 22px 4px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .scan {
+    width: 120px; height: 3px; border-radius: 2px;
+    background: var(--line);
+    overflow: hidden; position: relative;
+  }
+  .scan::after {
+    content: ""; position: absolute; inset: 0;
+    width: 40%;
+    background: linear-gradient(90deg, transparent, var(--amber), transparent);
+    animation: sweep 1.1s ease-in-out infinite;
+  }
+  @keyframes sweep {
+    0% { transform: translateX(-120%); }
+    100% { transform: translateX(320%); }
+  }
+
+  /* ---- Footer --------------------------------------------------------- */
+  footer {
+    margin-top: 56px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line-soft);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted-2);
+    display: flex; gap: 16px; flex-wrap: wrap;
+    align-items: center;
+  }
+  footer .sig { color: var(--muted); }
+
+  /* reveal animation, motion-safe only */
+  @media (prefers-reduced-motion: no-preference) {
+    .reveal { animation: rise 0.4s ease both; }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: none; }
+    }
+  }
+
+  :focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; border-radius: 4px; }
+
+  @media (max-width: 560px) {
+    .wrap { padding: 20px 16px 72px; }
+    .gauge { min-width: 50%; border-bottom: 1px solid var(--line-soft); }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <span class="mark">RAG<span class="op">Ops</span> Copilot</span>
+      <span class="tag">// grounded Q&amp;A over the vLLM docs</span>
+    </div>
+    <h1 class="thesis">Ask about vLLM. Get an answer that <span class="verified">cites its sources</span>.</h1>
+    <p class="subthesis">
+      Every reply is retrieved from the official vLLM documentation and grounded in
+      what it found — with the citations, the engine that answered, and the latency
+      shown, not hidden. If the docs don't cover it, it says so.
+    </p>
+  </header>
+
+  <div class="console">
+    <div class="console-bar">
+      <span class="dot live" id="statusDot" title="service status"></span>
+      <span id="statusText">ready</span>
+      <span class="spacer"></span>
+      <span>POST /ask</span>
+    </div>
+    <form id="askForm">
+      <div class="field">
+        <span class="caret">&gt;</span>
+        <textarea
+          id="q"
+          rows="1"
+          placeholder="How does vLLM do continuous batching?"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="Your question about vLLM"
+        ></textarea>
+      </div>
+      <div class="console-actions">
+        <button type="submit" class="ask" id="askBtn">Ask</button>
+        <span class="hint"><kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for newline</span>
+        <span class="spacer" style="flex:1"></span>
+        <label class="toggle" title="Route through the multi-step agent instead of fixed RAG">
+          <input type="checkbox" id="agentToggle" />
+          <span class="track"></span>
+          <span>agent mode</span>
+        </label>
+      </div>
+    </form>
+  </div>
+
+  <div class="examples">
+    <span class="lbl">Try</span>
+    <button class="chip" type="button">What is PagedAttention?</button>
+    <button class="chip" type="button">How does vLLM do continuous batching?</button>
+    <button class="chip" type="button">What quantization methods does vLLM support?</button>
+    <button class="chip" type="button">Does vLLM support Kubernetes autoscaling on Mars?</button>
+  </div>
+
+  <section id="result" aria-live="polite"></section>
+
+  <footer>
+    <span class="sig">RAGOps Copilot</span>
+    <span>·</span>
+    <a id="healthLink" href="/health" target="_blank" rel="noopener">/health</a>
+    <span>·</span>
+    <a href="https://docs.vllm.ai/" target="_blank" rel="noopener">vLLM docs ↗</a>
+  </footer>
+</div>
+
+<script>
+  "use strict";
+
+  const form = document.getElementById("askForm");
+  const q = document.getElementById("q");
+  const askBtn = document.getElementById("askBtn");
+  const agentToggle = document.getElementById("agentToggle");
+  const result = document.getElementById("result");
+  const statusDot = document.getElementById("statusDot");
+  const statusText = document.getElementById("statusText");
+
+  // Auto-grow the textarea as the user types (single-field console feel).
+  function autogrow() {
+    q.style.height = "auto";
+    q.style.height = Math.min(q.scrollHeight, 200) + "px";
+  }
+  q.addEventListener("input", autogrow);
+
+  // Enter submits; Shift+Enter inserts a newline.
+  q.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+
+  // Example chips populate the field and submit immediately.
+  document.querySelectorAll(".chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      q.value = chip.textContent;
+      autogrow();
+      q.focus();
+      form.requestSubmit();
+    });
+  });
+
+  // Escape HTML so answer/source text can never inject markup.
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+  }
+
+  // Turn the answer's [n] markers into clickable citation pills, and split on
+  // blank lines into paragraphs. Escapes first, so this only ever runs over
+  // text we produced.
+  function renderAnswer(text) {
+    const paras = esc(text).split(/\n\s*\n/).filter((p) => p.trim().length);
+    return paras
+      .map((p) => {
+        const withCites = p.replace(/\[(\d+)\]/g, (_m, n) =>
+          `<button class="cite" data-n="${n}" tabindex="0" ` +
+          `aria-label="Jump to source ${n}">[${n}]</button>`
+        );
+        return `<p>${withCites.replace(/\n/g, "<br>")}</p>`;
+      })
+      .join("");
+  }
+
+  // Wire each [n] pill to spotlight its source card.
+  function wireCitations() {
+    result.querySelectorAll(".cite").forEach((el) => {
+      const activate = () => {
+        const n = el.getAttribute("data-n");
+        const card = result.querySelector(`.source[data-n="${n}"]`);
+        if (!card) return;
+        result.querySelectorAll(".source.lit").forEach((s) => s.classList.remove("lit"));
+        card.classList.add("lit");
+        card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        setTimeout(() => card.classList.remove("lit"), 2200);
+      };
+      el.addEventListener("click", activate);
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(); }
+      });
+    });
+  }
+
+  function fmtMs(ms) {
+    if (ms >= 1000) return (ms / 1000).toFixed(2) + "<small>s</small>";
+    return Math.round(ms) + "<small>ms</small>";
+  }
+
+  // A refusal is the model correctly declining — surface it as such, not as an
+  // answer. We detect it the same way the backend does: a short reply with no
+  // citations that signals "not in the docs".
+  function looksLikeRefusal(data) {
+    if (data.citations && data.citations.length) return false;
+    return /not (in|covered|found).*doc|don'?t (have|know)|cannot find|no (relevant )?information/i.test(
+      data.answer || ""
+    );
+  }
+
+  function renderResult(data) {
+    const modeClass = data.mode === "agent" ? "agent" : "rag";
+    const telemetry = `
+      <div class="telemetry reveal">
+        <div class="gauge">
+          <div class="k">Engine</div>
+          <div class="v"><span class="badge ${modeClass}">${esc(data.mode)}</span></div>
+        </div>
+        <div class="gauge">
+          <div class="k">Tool rounds</div>
+          <div class="v">${data.steps}${data.degraded ? ' <span class="badge degraded">cap</span>' : ""}</div>
+        </div>
+        <div class="gauge">
+          <div class="k">Citations</div>
+          <div class="v">${(data.citations || []).length}</div>
+        </div>
+        <div class="gauge">
+          <div class="k">Latency</div>
+          <div class="v">${fmtMs(data.latency_ms)}</div>
+        </div>
+      </div>`;
+
+    if (looksLikeRefusal(data)) {
+      result.innerHTML =
+        telemetry +
+        `<div class="refusal reveal"><strong>Not in the vLLM docs.</strong> ` +
+        esc(data.answer) +
+        `</div>`;
+      return;
+    }
+
+    const sources = (data.citations || [])
+      .map(
+        (c) => `
+        <div class="source" data-n="${c.n}">
+          <div class="n">${c.n}</div>
+          <div class="meta">
+            <div class="title">${esc(c.title || "Untitled")}</div>
+            <a class="url" href="${esc(c.source)}" target="_blank" rel="noopener">${esc(c.source)}</a>
+          </div>
+        </div>`
+      )
+      .join("");
+
+    result.innerHTML =
+      telemetry +
+      `<div class="answer reveal">${renderAnswer(data.answer)}</div>` +
+      (sources
+        ? `<div class="sources reveal"><h3>Sources</h3>${sources}</div>`
+        : "");
+    wireCitations();
+  }
+
+  function setBusy(busy) {
+    askBtn.disabled = busy;
+    askBtn.textContent = busy ? "Asking…" : "Ask";
+    statusDot.classList.toggle("live", !busy);
+    statusText.textContent = busy ? "retrieving" : "ready";
+    if (busy) {
+      result.innerHTML =
+        `<div class="loading"><span class="scan"></span>` +
+        `retrieving from the vLLM docs…</div>`;
+    }
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const question = q.value.trim();
+    if (question.length < 3) {
+      q.focus();
+      return;
+    }
+    setBusy(true);
+
+    const body = { question };
+    if (agentToggle.checked) body.use_agent = true;
+
+    try {
+      const res = await fetch("/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        let detail = "";
+        try { detail = (await res.json()).detail || ""; } catch (_) {}
+        throw new Error(
+          detail ||
+            (res.status === 503
+              ? "The search backend is warming up or unavailable. Try again in a moment."
+              : `Request failed (HTTP ${res.status}).`)
+        );
+      }
+
+      const data = await res.json();
+      renderResult(data);
+    } catch (err) {
+      result.innerHTML =
+        `<div class="error reveal"><strong>Couldn't answer that.</strong> ` +
+        esc(err.message || "Network error — the service may be unreachable.") +
+        `</div>`;
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  // Passive health check on load — colour the console dot by real readiness.
+  (async () => {
+    try {
+      const res = await fetch("/health");
+      const ok = res.ok;
+      statusDot.classList.toggle("live", ok);
+      statusText.textContent = ok ? "ready" : "degraded";
+      if (!ok) statusDot.style.background = "var(--red)";
+    } catch (_) {
+      statusText.textContent = "offline";
+      statusDot.style.background = "var(--red)";
+    }
+  })();
+
+  q.focus();
+</script>

@@ -1,0 +1,113 @@
+# RAGOps Copilot — PRODUCTION compose (W7 D3, single-EC2 deploy).
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml exec api python -m src.ingest
+#   curl https://$DOMAIN/health
+#
+# This is a SEPARATE file from docker-compose.yml, not an overlay, on purpose:
+# an overlay (`-f base -f prod`) MERGES the `ports` lists rather than replacing
+# them, so it cannot *un-publish* the dev port mappings. The whole security
+# posture of this deploy is "OpenSearch and the API are not on the internet",
+# and the only way to guarantee that with compose is to define the prod topology
+# from scratch — which is what this file does.
+#
+# Difference from the dev compose (docker-compose.yml):
+#   - opensearch: NO published ports. Reachable only on the private compose
+#     network, by the api container. (Dev published 9200 for host-run evals.)
+#   - api: NO published ports. Reachable only by Caddy, over the compose network.
+#     (Dev published 8000 for localhost curl.)
+#   - caddy: NEW. The one internet-facing service — 80/443, TLS, static + proxy.
+#
+# Public exposure is therefore ports 80/443 on Caddy ONLY. The EC2 security
+# group should still open only 22/80/443 as defence in depth — this file and
+# the security group are two independent locks on the same door.
+
+services:
+  # ===========================================================================
+  # opensearch — vector store. PRIVATE: no host ports, compose network only.
+  # ===========================================================================
+  opensearch:
+    image: opensearchproject/opensearch:3.7.0
+    container_name: ragops-opensearch
+    environment:
+      - discovery.type=single-node
+      # Security plugin stays off because this node is NOT reachable from
+      # outside the compose network — nothing publishes 9200 to the host, and
+      # the security group blocks it regardless. Turning TLS/auth on here would
+      # mean managing certs + credentials for a service only the api container
+      # ever talks to. The isolation is the control; revisit if OpenSearch ever
+      # needs to leave this box.
+      - DISABLE_SECURITY_PLUGIN=true
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  # ===========================================================================
+  # api — FastAPI service. PRIVATE: reachable only by Caddy over the network.
+  # ===========================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ragops-copilot:latest
+    container_name: ragops-api
+    environment:
+      # Service-name DNS on the compose network — NOT localhost (that would be
+      # the api container itself). See docker-compose.yml for the full note.
+      - OPENSEARCH_HOST=http://opensearch:9200
+    env_file:
+      # DEEPSEEK_API_KEY (and DOMAIN/ACME_EMAIL for the other services) live in
+      # .env on the server. .env is gitignored + dockerignored, so the key
+      # reaches neither git nor an image layer — injected only at run time.
+      - .env
+    volumes:
+      # The corpus, read-only. `... exec api python -m src.ingest` reads
+      # data/chunks.jsonl; the image deliberately has no copy (data/ is in
+      # .dockerignore). Shipped to the box separately (scp), see deploy/README.md.
+      - ./data:/app/data:ro
+      # Model weights cache — bge-small downloads once into this named volume,
+      # not on every restart.
+      - hf-cache:/home/app/.cache/huggingface
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ===========================================================================
+  # caddy — the edge. The ONLY service on the public internet.
+  # ===========================================================================
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: ragops-caddy
+    environment:
+      # Interpolated from .env in this directory. DOMAIN is the hostname Caddy
+      # gets a certificate for; ACME_EMAIL is optional (LE expiry notices).
+      - DOMAIN=${DOMAIN:?set DOMAIN in .env, e.g. ragops.example.com}
+      - ACME_EMAIL=${ACME_EMAIL:-}
+    ports:
+      - "80:80"    # HTTP — needed for the ACME challenge + redirect to HTTPS
+      - "443:443"  # HTTPS
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./frontend:/srv:ro                 # the static single-page frontend
+      - caddy-data:/data                   # issued certs — MUST persist across
+      - caddy-config:/config               # restarts or LE will re-issue + rate-limit
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  opensearch-data:
+  hf-cache:
+  caddy-data:
+  caddy-config:

@@ -1,5 +1,8 @@
 # --- Secrets ---
 .env
+# SSH private keys for the EC2 deploy — NEVER commit these.
+*.pem
+deploy/*.pem
 
 # --- Local-only project brief (personal learning plan, not for the public repo) ---
 CLAUDE.md

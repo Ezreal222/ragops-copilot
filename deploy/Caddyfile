@@ -1,0 +1,46 @@
+# RAGOps Copilot — edge: TLS termination + static host + reverse proxy (W7 D3).
+#
+# Caddy is the ONLY service published to the internet (ports 80/443). It does
+# three jobs the FastAPI app should not:
+#   1. Terminates HTTPS. {$DOMAIN} is injected from the environment; Caddy
+#      obtains and renews a Let's Encrypt certificate for it automatically, so
+#      there is no certbot cron and no cert files to manage.
+#   2. Serves the single-page frontend (mounted at /srv) for every non-API path.
+#   3. Reverse-proxies the API surface to the `api` container over the private
+#      compose network — the api and opensearch containers publish NO host
+#      ports, so this proxy is the only way in. That is what keeps OpenSearch
+#      (an unauthenticated vector store) entirely off the public internet.
+#
+# Let's Encrypt issuance needs no email (Caddy just won't send expiry notices).
+# To add one, put `email you@example.com` inside a global-options block `{ ... }`
+# at the very top of this file — left out here so an unset value can't break the
+# parse.
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# --- API surface -> FastAPI container -------------------------------------
+	# Only these exact paths reach the backend. Everything else is static, so a
+	# stray path can't probe the app server. /docs + /openapi.json expose the
+	# interactive OpenAPI UI (a nice-to-have for a portfolio demo); drop them
+	# from this matcher if you'd rather keep the API surface private.
+	@api path /ask /health /docs /openapi.json /redoc
+	handle @api {
+		reverse_proxy api:8000
+	}
+
+	# --- Everything else -> the static frontend -------------------------------
+	handle {
+		root * /srv
+		file_server
+	}
+
+	# Strip the identifying Server header from responses.
+	header -Server
+
+	# Access + error logs to stdout so `docker compose logs caddy` shows traffic.
+	log {
+		output stdout
+		format console
+	}
+}
