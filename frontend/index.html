@@ -323,6 +323,165 @@
   }
   .answer p { margin: 0 0 14px; }
   .answer p:last-child { margin-bottom: 0; }
+  .answer > :first-child { margin-top: 0; }
+
+  /* ---- Rendered markdown ---------------------------------------------
+     The model answers in the corpus's OWN dialect — MkDocs markdown — because
+     that is what it was retrieved from: fenced code, inline code, and even
+     "!!! warning" admonitions. Until now the page printed that syntax raw, so a
+     `vllm serve` command arrived as literal backticks. It renders instead.
+
+     No new colour enters the palette here. Amber stays reserved for the citation
+     signal, so code and callouts never compete with the page's one loud element;
+     they are built from --panel-2, --line-soft and the mono face already loaded.
+  */
+  .answer h2, .answer h3, .answer h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+    line-height: 1.3;
+    margin: 24px 0 10px;
+  }
+  .answer h2 { font-size: 20px; font-weight: 600; }
+  .answer h3 { font-size: 17px; font-weight: 600; }
+  .answer h4 { font-size: 15px; font-weight: 500; color: var(--muted); }
+
+  .answer ul, .answer ol { margin: 0 0 14px; padding-left: 22px; }
+  .answer li { margin: 4px 0; }
+  .answer li::marker { color: var(--muted-2); }
+  .answer strong { font-weight: 600; color: #fff; }
+  .answer hr { border: 0; height: 1px; background: var(--line-soft); margin: 22px 0; }
+
+  .answer blockquote {
+    margin: 0 0 14px;
+    padding: 2px 0 2px 14px;
+    border-left: 2px solid var(--line);
+    color: var(--muted);
+  }
+
+  /* inline code — a chip, not a pill: it must read quieter than a [n] cite.
+     Wraps rather than nowraps, because real answers carry long identifiers like
+     `python -m vllm.entrypoints.openai.api_server --model <model>`. */
+  .answer code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    background: var(--panel-2);
+    border: 1px solid var(--line-soft);
+    border-radius: 5px;
+    padding: 1px 5px;
+    overflow-wrap: anywhere;
+  }
+
+  /* fenced code — a recessed readout. The header reuses the page's existing
+     "mono label + hairline running to the edge" device (see .sources h3::after),
+     so a code block is visibly the same family of object as a sources panel. */
+  .codeblock {
+    margin: 0 0 16px;
+    border: 1px solid var(--line-soft);
+    border-radius: 10px;
+    background: var(--panel-2);
+    overflow: hidden;
+  }
+  .codeblock-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px 7px 14px;
+    border-bottom: 1px solid var(--line-soft);
+    background: rgba(0, 0, 0, 0.16);
+  }
+  .codeblock-lang {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted-2);
+  }
+  .codeblock-rule { flex: 1; height: 1px; background: var(--line-soft); }
+  .codeblock pre { margin: 0; padding: 12px 14px; overflow-x: auto; }
+  .codeblock pre code {
+    font-family: var(--font-mono);
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: var(--ink);
+    background: none;
+    border: 0;
+    padding: 0;
+    white-space: pre;
+  }
+
+  /* Copy exists because most of these blocks are a command someone is about to
+     run. It confirms in teal — the same "verified" green the grounded badge
+     uses — so the confirmation reads as part of the system's vocabulary. */
+  .copy {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 2px 8px;
+    cursor: pointer;
+    transition: color 0.12s ease, border-color 0.12s ease;
+  }
+  .copy:hover, .copy:focus-visible {
+    color: var(--amber);
+    border-color: var(--amber-dim);
+    outline: none;
+  }
+  .copy.done { color: var(--teal); border-color: var(--teal); }
+
+  /* MkDocs admonitions ("!!! warning"). These arrive because the corpus IS the
+     vLLM docs and the model writes in their voice. Rendering them keeps real
+     information — the example in the wild is a deprecation notice — that would
+     otherwise land as "!!!" noise. */
+  .admon {
+    margin: 0 0 16px;
+    padding: 11px 14px;
+    background: var(--panel);
+    border: 1px solid var(--line-soft);
+    border-left: 3px solid var(--muted-2);
+    border-radius: 8px;
+  }
+  .admon-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted-2);
+    margin-bottom: 5px;
+  }
+  .admon p { margin: 0 0 8px; }
+  .admon p:last-child { margin-bottom: 0; }
+  .admon.warning, .admon.caution { border-left-color: var(--amber); }
+  .admon.warning .admon-label, .admon.caution .admon-label { color: var(--amber); }
+  .admon.danger, .admon.error { border-left-color: var(--red); }
+  .admon.danger .admon-label, .admon.error .admon-label { color: var(--red); }
+  .admon.note, .admon.tip, .admon.info { border-left-color: var(--teal); }
+  .admon.note .admon-label, .admon.tip .admon-label, .admon.info .admon-label { color: var(--teal); }
+
+  .answer table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0;
+    font-size: 14px;
+  }
+  .answer th, .answer td {
+    border: 1px solid var(--line-soft);
+    padding: 7px 10px;
+    text-align: left;
+  }
+  .answer th {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted-2);
+    background: var(--panel);
+  }
+  /* a wide doc table must scroll in its own well, never widen the page */
+  .table-scroll { overflow-x: auto; margin: 0 0 16px; }
 
   /* inline citation pill [n] — the signature link between claim and source */
   .cite {
@@ -606,20 +765,216 @@
     return BASE + p;
   }
 
-  // Turn the answer's [n] markers into clickable citation pills, and split on
-  // blank lines into paragraphs. Escapes first, so this only ever runs over
-  // text we produced.
+  // ---- Answer rendering -------------------------------------------------
+  // The model writes in the corpus's dialect (MkDocs markdown), so we render
+  // that dialect: fenced code, inline code, headings, lists, tables, and the
+  // "!!! warning" admonitions the vLLM docs use. Small and hand-rolled on
+  // purpose — this page ships as ONE self-contained file with no build step, and
+  // a full markdown library would be more code than the subset we actually see.
+  //
+  // SECURITY INVARIANT, do not break it: esc() runs over every span of model
+  // text BEFORE any markup is added, and no branch below inserts un-escaped
+  // text. The answer is untrusted input — it quotes documentation that can
+  // itself contain HTML, and it is written by a model reading fetched content.
+
+  // Inline spans. `s` is ALREADY escaped. Order matters: `code` is pulled out
+  // first and restored last, so a snippet like `arr[1]` can't come back as a
+  // citation pill, and ** inside code stays literal.
+  function inline(s) {
+    const stash = [];
+    const keep = (html) => "\u0000" + (stash.push(html) - 1) + "\u0000";
+
+    let out = s.replace(/`([^`\n]+)`/g, (_m, c) => keep(`<code>${c}</code>`));
+
+    // Links: http/https only. An escaped URL can't carry quotes out of the
+    // attribute, and the scheme allowlist is what keeps javascript: out.
+    out = out.replace(
+      /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
+      (_m, label, href) =>
+        keep(`<a href="${href}" target="_blank" rel="noopener">${label}</a>`)
+    );
+
+    out = out
+      .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*\w])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+      // The citation pill — the page's signature, and the reason [n] survives
+      // everything above untouched.
+      .replace(/\[(\d+)\]/g, (_m, n) =>
+        `<button class="cite" data-n="${n}" tabindex="0" ` +
+        `aria-label="Jump to source ${n}">[${n}]</button>`
+      );
+
+    return out.replace(/\u0000(\d+)\u0000/g, (_m, i) => stash[i]);
+  }
+
+  function codeBlock(lang, body) {
+    return (
+      '<div class="codeblock">' +
+        '<div class="codeblock-bar">' +
+          `<span class="codeblock-lang">${esc(lang || "code")}</span>` +
+          '<span class="codeblock-rule"></span>' +
+          '<button class="copy" type="button">Copy</button>' +
+        "</div>" +
+        `<pre><code>${esc(body.replace(/\n+$/, ""))}</code></pre>` +
+      "</div>"
+    );
+  }
+
+  const ADMON_KINDS = ["note", "tip", "info", "warning", "caution", "danger", "error"];
+
+  // Block structure for one span of non-code text.
+  function renderBlocks(chunk) {
+    const lines = chunk.split("\n");
+    let html = "";
+    let para = [];
+
+    const flushPara = () => {
+      if (!para.length) return;
+      html += `<p>${inline(esc(para.join("\n"))).replace(/\n/g, "<br>")}</p>`;
+      para = [];
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      if (!line.trim()) { flushPara(); continue; }
+
+      // "!!! warning" / '!!! note "Title"' — MkDocs admonition. Its body is the
+      // indented lines that follow, so consume them here.
+      const admon = line.match(/^!!!\s+(\w+)(?:\s+"([^"]*)")?\s*$/);
+      if (admon) {
+        flushPara();
+        const kind = admon[1].toLowerCase();
+        const cls = ADMON_KINDS.includes(kind) ? kind : "note";
+        const body = [];
+        while (i + 1 < lines.length && (/^\s{4}/.test(lines[i + 1]) || !lines[i + 1].trim())) {
+          if (!lines[i + 1].trim() && !/^\s{4}/.test(lines[i + 2] || "")) break;
+          body.push(lines[++i].replace(/^\s{4}/, ""));
+        }
+        html +=
+          `<div class="admon ${cls}">` +
+          `<span class="admon-label">${esc(admon[2] || kind)}</span>` +
+          renderBlocks(body.join("\n")) +
+          "</div>";
+        continue;
+      }
+
+      const heading = line.match(/^(#{1,6})\s+(.*)$/);
+      if (heading) {
+        flushPara();
+        // Answers are short, so a top-level "#" would out-shout the page's own
+        // h1. Everything lands at h2..h4.
+        const level = Math.min(heading[1].length + 1, 4);
+        html += `<h${level}>${inline(esc(heading[2]))}</h${level}>`;
+        continue;
+      }
+
+      if (/^\s*([-*_])\1{2,}\s*$/.test(line)) { flushPara(); html += "<hr>"; continue; }
+
+      // Table: a pipe row followed by a |---|---| separator.
+      if (/^\s*\|.*\|\s*$/.test(line) && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1] || "")) {
+        flushPara();
+        const cells = (row) =>
+          row.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+        const head = cells(line);
+        i++; // skip the separator
+        let rows = "";
+        while (i + 1 < lines.length && /^\s*\|.*\|\s*$/.test(lines[i + 1])) {
+          rows +=
+            "<tr>" +
+            cells(lines[++i]).map((c) => `<td>${inline(esc(c))}</td>`).join("") +
+            "</tr>";
+        }
+        html +=
+          '<div class="table-scroll"><table><thead><tr>' +
+          head.map((c) => `<th>${inline(esc(c))}</th>`).join("") +
+          `</tr></thead><tbody>${rows}</tbody></table></div>`;
+        continue;
+      }
+
+      if (/^\s*>\s?/.test(line)) {
+        flushPara();
+        const quote = [];
+        while (i < lines.length && /^\s*>\s?/.test(lines[i])) {
+          quote.push(lines[i].replace(/^\s*>\s?/, ""));
+          i++;
+        }
+        i--;
+        html += `<blockquote>${renderBlocks(quote.join("\n"))}</blockquote>`;
+        continue;
+      }
+
+      // Lists. A blank line between items is common, so we keep consuming while
+      // the NEXT non-blank line is still an item of the same kind.
+      const bullet = /^\s*[-*+]\s+/;
+      const number = /^\s*\d+[.)]\s+/;
+      const isItem = bullet.test(line) ? bullet : number.test(line) ? number : null;
+      if (isItem) {
+        flushPara();
+        const tag = isItem === bullet ? "ul" : "ol";
+        let items = "";
+        while (i < lines.length) {
+          if (isItem.test(lines[i])) {
+            items += `<li>${inline(esc(lines[i].replace(isItem, "")))}</li>`;
+          } else if (lines[i].trim() && /^\s{2,}/.test(lines[i])) {
+            // a wrapped continuation line belongs to the item above
+            items = items.replace(/<\/li>$/, " " + inline(esc(lines[i].trim())) + "</li>");
+          } else if (lines[i].trim()) {
+            break;
+          }
+          i++;
+        }
+        i--;
+        html += `<${tag}>${items}</${tag}>`;
+        continue;
+      }
+
+      para.push(line);
+    }
+
+    flushPara();
+    return html;
+  }
+
+  // Fenced code is extracted FIRST and kept verbatim: nothing inside a fence is
+  // markdown, and its bracketed text must never become a citation.
   function renderAnswer(text) {
-    const paras = esc(text).split(/\n\s*\n/).filter((p) => p.trim().length);
-    return paras
-      .map((p) => {
-        const withCites = p.replace(/\[(\d+)\]/g, (_m, n) =>
-          `<button class="cite" data-n="${n}" tabindex="0" ` +
-          `aria-label="Jump to source ${n}">[${n}]</button>`
-        );
-        return `<p>${withCites.replace(/\n/g, "<br>")}</p>`;
-      })
-      .join("");
+    const src = String(text).replace(/\r\n/g, "\n");
+    const fence = /```([\w+#.-]*)[ \t]*\n([\s\S]*?)```/g;
+    let html = "";
+    let last = 0;
+    let m;
+    while ((m = fence.exec(src))) {
+      html += renderBlocks(src.slice(last, m.index));
+      html += codeBlock(m[1], m[2]);
+      last = fence.lastIndex;
+    }
+    // A fence the model never closed: render the remainder as text rather than
+    // swallowing the answer.
+    html += renderBlocks(src.slice(last));
+    return html;
+  }
+
+  // Copy the block's command — most of these are something you're about to run.
+  function wireCopy() {
+    result.querySelectorAll(".copy").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const code = btn.closest(".codeblock").querySelector("code");
+        try {
+          await navigator.clipboard.writeText(code.textContent);
+          btn.textContent = "Copied";
+          btn.classList.add("done");
+        } catch {
+          // Clipboard is permission-gated and fails on http:// origins. Say what
+          // to do instead of apologising.
+          btn.textContent = "Select it";
+        }
+        setTimeout(() => {
+          btn.textContent = "Copy";
+          btn.classList.remove("done");
+        }, 1600);
+      });
+    });
   }
 
   // Wire each [n] pill to spotlight its source card.
@@ -707,6 +1062,7 @@
         ? `<div class="sources reveal"><h3>Sources</h3>${sources}</div>`
         : "");
     wireCitations();
+    wireCopy();
   }
 
   function setBusy(busy) {
