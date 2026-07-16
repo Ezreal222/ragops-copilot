@@ -32,6 +32,7 @@ from opensearchpy.exceptions import ConnectionTimeout
 from src.config import AGENT, RETRIEVAL
 from src.embeddings import Embedder
 from src.generate import format_context
+from src.metrics import tool_errors_total
 from src.opensearch_client import get_client
 from src.retrieve import search
 
@@ -129,12 +130,21 @@ def safe_tool(fn):
         try:
             return fn(*args, **kwargs)
         except _TRANSIENT_ERRORS as exc:
+            # W7 D4 — count it. This guardrail's whole design is that a tool
+            # failure becomes a readable observation instead of an exception, so
+            # by construction it never reaches the API's exception counter: the
+            # request still returns 200, just with a worse answer. Without this
+            # counter, "the docs backend is down and every answer is quietly
+            # degrading" looks perfectly healthy on the dashboard. That silent
+            # failure mode is exactly what this metric exists to expose.
+            tool_errors_total.labels(tool=fn.__name__).inc()
             return (
                 f"TOOL ERROR: the vLLM docs search service is unavailable "
                 f"({type(exc).__name__}) after retries. Tell the user you "
                 f"can't reach the documentation right now; do not fabricate an answer."
             )
         except Exception as exc:  # last-resort backstop — never let it hit the graph
+            tool_errors_total.labels(tool=fn.__name__).inc()
             return (
                 f"TOOL ERROR: '{fn.__name__}' failed unexpectedly "
                 f"({type(exc).__name__}). Do not retry it; tell the user the "

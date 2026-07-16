@@ -1,0 +1,437 @@
+{
+  "uid": "ragops-copilot",
+  "title": "RAGOps Copilot — service health",
+  "tags": ["ragops", "rag", "llm"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "description": "W7 D4. Latency / throughput / failure / refusal / cost for the RAG service. Every panel reads Prometheus series scraped from the API's /metrics endpoint (src/metrics.py). Rate windows are 5m: this is a low-traffic demo service, so a shorter window would show empty gaps between bursts of traffic rather than a signal.",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "QPS",
+      "description": "Throughput: questions answered per second, averaged over 5m. rate() on a counter handles restarts correctly (a reset to 0 is detected, not read as a huge negative jump) — which is exactly why counters are cumulative-since-boot rather than per-interval deltas computed by the app.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 3,
+          "color": { "mode": "fixed", "fixedColor": "text" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(ask_requests_total[5m]))",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Refusal rate",
+      "description": "Share of answers that were an honest 'I couldn't find this in the vLLM docs'. A refusal is CORRECT behaviour on an unanswerable question — better than hallucinating — so this is never expected to be zero. What matters is the trend: a jump means retrieval stopped finding docs it used to find (broken index, wrong embedder, corpus drift). This is the RAG-specific metric a generic web dashboard would never have, and it catches quality regressions long before anyone files a bug.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.25 },
+              { "color": "red", "value": 0.5 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(ask_requests_total{outcome=\"refused\"}[5m])) / clamp_min(sum(rate(ask_requests_total[5m])), 0.0000001)",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Failure rate (5xx)",
+      "description": "Share of requests that died with an unhandled error. The denominator is successes + exceptions, because a request that raised never reached ask_requests_total — it is NOT in that counter, so dividing by it alone would understate the rate. Caveat worth knowing: this only sees failures that RAISED. An agent answer degraded by a dead search tool returns 200 and lands in 'answered' — see the 'Tool errors' panel, which is the only thing that catches that.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.01 },
+              { "color": "red", "value": 0.05 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(ask_exceptions_total[5m])) / clamp_min(sum(rate(ask_exceptions_total[5m])) + sum(rate(ask_requests_total[5m])), 0.0000001)",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Cost per query by engine (avg since boot)",
+      "description": "Dollars spent / questions answered, per engine, both cumulative since the process started. Split by mode because that comparison is the point: the agent re-sends the whole accumulated message list on every turn, so its prompt tokens grow per step while fixed RAG pays one flat call — this panel is where that shows up as money. An ALL-TIME average, not a rate, so it's the honest headline number for 'what does one answer cost us'. Resets when the API restarts (counters are per-process). Prices come from LLMConfig.price_*_usd_per_1m; if those are wrong, this is wrong.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 5,
+          "color": { "mode": "fixed", "fixedColor": "text" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none",
+        "orientation": "horizontal"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (mode) (llm_cost_usd_total) / clamp_min(sum by (mode) (ask_requests_total), 1)",
+          "legendFormat": "{{mode}}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Latency by mode — p95 vs p50",
+      "description": "THE core panel. p95 is computed from the histogram's buckets server-side (histogram_quantile over rate(..._bucket)), which is why latency is a Histogram and not a Summary: buckets are additive, so this stays correct across multiple API replicas, whereas per-instance Summary quantiles can never be averaged. p50 is drawn alongside deliberately — the gap between the two IS the tail, and an average would hide it. Watch 'agent' sit well above 'rag': each agent turn re-sends the whole accumulated message list, so it pays several LLM round-trips per question.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": ".*p50.*" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 6] } },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le, mode) (rate(ask_latency_seconds_bucket[5m])))",
+          "legendFormat": "{{mode}} p95"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum by (le, mode) (rate(ask_latency_seconds_bucket[5m])))",
+          "legendFormat": "{{mode}} p50"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "LLM spend ($/hour)",
+      "description": "Burn rate: the per-second rate of the cost counter scaled to an hour, so it reads as 'at this traffic, we spend $X/h'. The counter is incremented at each LLM boundary (src/metrics.record_llm_usage) using the provider's own reported token usage — the number they will bill, not a tokenizer estimate. Cost is the third axis of the quality/latency/cost triangle, and the one a generic dashboard never shows.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 4,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (mode) (rate(llm_cost_usd_total[5m])) * 3600",
+          "legendFormat": "{{mode}} $/hour"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Request outcomes by mode",
+      "description": "Stacked answered / refused / degraded per engine. 'outcome' is three-valued on purpose: a refusal and a degraded answer are both HTTP 200 and both look healthy in transport terms, while meaning very different things in product terms. 'degraded' = the agent hit its step cap and gave up; any sustained amount of it is the non-convergence problem the W6 D6 regression measured.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 12 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 3,
+          "min": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "stacking": { "mode": "normal", "group": "A" }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (mode, outcome) (rate(ask_requests_total[5m]))",
+          "legendFormat": "{{mode}} / {{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Agent steps per question",
+      "description": "Tool-call rounds. A healthy lookup is 1 — the fixed-RAG path is 1 by construction, so any average above 1 is the agent taking extra turns. Each extra step is another full LLM call with a longer prompt, so this line is a leading indicator for BOTH the latency and the cost panels. Creeping toward the step cap (AgentConfig.recursion_limit = 8) means thrashing.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 12 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(agent_steps_sum[5m]) / clamp_min(rate(agent_steps_count[5m]), 0.0000001)",
+          "legendFormat": "avg steps"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(agent_steps_bucket[5m])))",
+          "legendFormat": "p95 steps"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Tool errors by tool",
+      "description": "The silent-degradation catcher, and the panel worth explaining in an interview. tools.safe_tool converts every tool failure into a readable observation so the agent never crashes — which means a dead OpenSearch produces a 200 OK, an answer the LLM wrote around 'TOOL ERROR', and a perfectly green failure-rate panel. Verified by fault injection: with OpenSearch stopped, fixed RAG returned 503 (caught by 'Failure rate'), but the agent returned 200 and counted as 'answered'. This counter is the ONLY signal that the docs backend is down.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 12 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 3,
+          "min": 0,
+          "color": { "mode": "fixed", "fixedColor": "red" },
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (tool) (rate(tool_errors_total[5m]))",
+          "legendFormat": "{{tool}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Cumulative LLM spend",
+      "description": "Total dollars since the API process started. Resets on restart — these counters live in the process's memory (see the process note in src/metrics.py).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 19 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 4,
+          "color": { "mode": "fixed", "fixedColor": "text" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(llm_cost_usd_total)",
+          "legendFormat": "total",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Tokens (cumulative)",
+      "description": "Prompt vs completion tokens since boot. Expect prompt to dwarf completion — that IS retrieval-augmented generation: we stuff k doc excerpts into every prompt, so the input side is where the tokens go. Note the model is a thinking model, so its hidden reasoning tokens are billed as COMPLETION even though they never appear in the answer.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 12, "x": 6, "y": 19 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "text" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "area",
+        "orientation": "horizontal"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (mode, type) (llm_tokens_total)",
+          "legendFormat": "{{mode}} {{type}}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Questions answered (cumulative)",
+      "description": "Total /ask requests that produced a response, by engine. The denominator behind 'Cost per query'.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 19 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "text" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name",
+        "graphMode": "none",
+        "orientation": "horizontal"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (mode) (ask_requests_total)",
+          "legendFormat": "{{mode}}",
+          "instant": true
+        }
+      ]
+    }
+  ]
+}

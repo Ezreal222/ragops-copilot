@@ -17,8 +17,10 @@ dependencies = [
     "markdownify>=1.2.2",
     "openai>=2.44.0",
     "opensearch-py>=3.2.0",
+    "prometheus-client>=0.25.0",
     "python-dotenv>=1.2.2",
     "ragas>=0.2,<0.3",
+    "requests>=2.34.2",
     "sentence-transformers>=5.6.0",
     "uvicorn>=0.51.0",
 ]

@@ -42,6 +42,7 @@ from langgraph.prebuilt import ToolNode
 from src.agent.tools import compare, list_sources, search_docs
 from src.config import AGENT, LLM, AgentConfig, LLMConfig
 from src.generate import SYSTEM_PROMPT, _CITATION_RE, _cited_sources
+from src.metrics import record_llm_usage
 
 # Load .env so the provider key is available. Safe to call repeatedly.
 load_dotenv()
@@ -136,7 +137,30 @@ def build_graph(config: LLMConfig = LLM):
         Returns the new AIMessage; the `add_messages` reducer appends it.
         """
         messages = [SystemMessage(content=AGENT_SYSTEM_PROMPT)] + state["messages"]
-        return {"messages": [llm_with_tools.invoke(messages)]}
+        response = llm_with_tools.invoke(messages)
+
+        # W7 D4 — record what this turn cost. Note this fires PER TURN, not per
+        # question: a 3-step agent run makes 3 LLM calls and records 3 times.
+        # That's the honest accounting, and it's precisely why the agent is the
+        # expensive path — each turn re-sends the whole accumulated message list
+        # (system prompt + question + every excerpt every tool has returned so
+        # far), so prompt tokens grow with each step instead of staying flat like
+        # the fixed pipeline's single call. The cost panel exists to show that.
+        #
+        # LangChain normalizes provider usage onto the message as
+        # `usage_metadata` ({input_tokens, output_tokens, total_tokens}) — the
+        # same numbers generate.py reads off `resp.usage`, under LangChain's
+        # vendor-neutral names.
+        usage = getattr(response, "usage_metadata", None) or {}
+        if usage:
+            record_llm_usage(
+                usage.get("input_tokens", 0),
+                usage.get("output_tokens", 0),
+                mode="agent",
+                config=config,
+            )
+
+        return {"messages": [response]}
 
     def should_continue(state: MessagesState) -> str:
         """The ReAct switch: did the LLM ask to act, or is it done?

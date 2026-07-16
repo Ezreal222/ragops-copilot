@@ -1,0 +1,29 @@
+# Grafana datasource provisioning (W7 D4).
+#
+# Grafana normally learns about its datasources from a human clicking through the
+# UI, and stores them in its own sqlite DB. That would make the dashboard
+# unreproducible: `docker compose up` on a fresh machine would give you a Grafana
+# with no idea where Prometheus is, and every panel would read "datasource not
+# found". Provisioning inverts it — Grafana reads this file at boot and creates
+# the datasource itself. Config as code, same motivation as compose.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    # The uid is the load-bearing field: the dashboard JSON references its
+    # datasource BY UID. Grafana normally generates a random one, which would
+    # mean a dashboard exported from your Grafana wouldn't bind to the datasource
+    # in mine. Pinning it to a stable literal here — and using that same literal
+    # in monitoring/grafana/dashboards/ragops.json — is what makes the committed
+    # dashboard portable.
+    uid: prometheus
+    # `proxy`: the Grafana SERVER fetches from Prometheus, so this URL resolves
+    # container-to-container on the compose network. The alternative (`direct`)
+    # makes the user's BROWSER fetch it, which would need prometheus published to
+    # the host and would break the moment this runs anywhere but localhost.
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false # provisioned config is the source of truth, not UI edits

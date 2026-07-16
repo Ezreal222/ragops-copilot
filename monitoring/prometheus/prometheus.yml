@@ -1,0 +1,46 @@
+# Prometheus scrape config (W7 D4).
+#
+# Prometheus is a PULL system, and this file is the entire "integration". The API
+# doesn't know Prometheus exists — it just keeps honest counters in memory and
+# serves them at /metrics (src/api/main.py). Prometheus comes and reads them on a
+# timer, stamps each read with the scrape time, and stores the result as a time
+# series. Everything else (p95, QPS, refusal rate) is a QUERY over those series,
+# evaluated at dashboard time — not something the app has to pre-compute.
+
+global:
+  # How often to read /metrics. This is the resolution limit of every panel: a
+  # 15s scrape can't show you a 5s spike, only that the counter moved. Faster
+  # costs storage and load for detail we don't need on a demo service; 15s is the
+  # community default and right here.
+  scrape_interval: 15s
+  # How often alerting/recording rules would be evaluated. We define none yet —
+  # alerts are the natural next step (page when refusal rate or p95 goes bad).
+  evaluation_interval: 15s
+
+scrape_configs:
+  # --- The API itself.
+  - job_name: ragops-api
+    # `metrics_path` defaults to /metrics — exactly where we exposed it.
+    static_configs:
+      # `api:8000`, NOT localhost:8000 — the same container-networking rule the
+      # api service already follows to reach opensearch. Inside the prometheus
+      # container, localhost IS the prometheus container, where nothing serves
+      # our metrics. On a compose network, services resolve each other by SERVICE
+      # NAME through compose's DNS.
+      #
+      # `static_configs` is the simplest of Prometheus's service-discovery
+      # mechanisms: a hardcoded list. Honest for a fixed compose stack. A real
+      # fleet uses discovery (EC2/Kubernetes SD) so new instances get scraped
+      # automatically instead of being edited in by hand.
+      - targets: ["api:8000"]
+        labels:
+          # Attached to every series from this target. Unnecessary with one
+          # service, but it's the seam for when a second one exists.
+          service: ragops-api
+
+  # --- Prometheus scraping ITSELF. Free, and the standard answer to "is my
+  # monitoring actually working?" — if this job goes stale the dashboard is
+  # lying by omission, which is worse than showing zero.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -31,6 +31,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from src.config import LLM, RETRIEVAL, LLMConfig
+from src.metrics import record_llm_usage
 from src.retrieve import search
 
 # Load .env so the provider key is available as an env
@@ -128,6 +129,25 @@ def generate_answer(
         max_tokens=config.max_tokens,
         temperature=config.temperature,
     )
+
+    # W7 D4 — the LLM boundary is the only place that knows what this call cost,
+    # so it reports the tokens here. The provider returns `usage` on every
+    # response, so we record the number they will actually BILL, not a tokenizer
+    # estimate. Guarded with getattr because `usage` is optional in the OpenAI
+    # schema: a provider omitting it should cost us a metric, never an answer.
+    usage = getattr(resp, "usage", None)
+    if usage:
+        # mode="rag" is a constant, not a lie waiting to happen: this function is
+        # the fixed pipeline's generation step and is never on the agent path
+        # (agent/graph.py imports the prompt and citation helpers from here, but
+        # makes its own LLM calls).
+        record_llm_usage(
+            usage.prompt_tokens or 0,
+            usage.completion_tokens or 0,
+            mode="rag",
+            config=config,
+        )
+
     return resp.choices[0].message.content.strip()
 
 

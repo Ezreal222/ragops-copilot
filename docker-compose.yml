@@ -110,6 +110,87 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ===========================================================================
+  # prometheus — scrapes the API's /metrics and stores it as time series (D4)
+  # ===========================================================================
+  prometheus:
+    image: prom/prometheus:v3.7.3 # pinned, for the same reason opensearch is
+    container_name: ragops-prometheus
+    command:
+      # The image's default command would do, but naming the flags explicitly is
+      # what lets us set retention — and the defaults are only sensible until you
+      # want to change one, at which point you must re-state them all.
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # 15 days is plenty for a demo and bounds the disk. Prometheus is a
+      # short-term operational store by design; long-term history is a different
+      # system's job (Thanos/Mimir/managed), not a bigger retention flag.
+      - --storage.tsdb.retention.time=15d
+      # Lets us POST /-/reload to pick up a config change instead of restarting.
+      - --web.enable-lifecycle
+    volumes:
+      # The scrape config, read-only — the container has no business editing it.
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # The TSDB. A named volume, so metric history survives `down` and container
+      # replacement — same lesson as opensearch-data.
+      - prometheus-data:/prometheus
+    ports:
+      # Published so you can hit the Prometheus UI at localhost:9090 and try
+      # PromQL by hand — genuinely the fastest way to debug a panel showing
+      # "No data": run its query there and look at the raw series.
+      - "9090:9090"
+    depends_on:
+      # Order only, deliberately NOT `service_healthy`: Prometheus scraping a
+      # not-yet-ready API is a NORMAL, self-healing condition — the target reads
+      # "down" for a few scrapes, then goes up. Monitoring that refuses to start
+      # until the thing it monitors is healthy has it exactly backwards; you want
+      # it watching THROUGH the unhealthy window.
+      - api
+    restart: unless-stopped
+
+  # ===========================================================================
+  # grafana — the dashboards over Prometheus (D4)
+  # ===========================================================================
+  grafana:
+    image: grafana/grafana:12.3.1 # pinned
+    container_name: ragops-grafana
+    environment:
+      # Dev credentials. `:-` supplies the default when the env var is unset, so
+      # a fresh clone just works while a real deployment overrides it without
+      # touching this file. Acceptable only because this Grafana is bound to
+      # localhost and holds no data of its own — do NOT copy to anything
+      # internet-facing.
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # Land straight on our dashboard instead of Grafana's welcome page. The
+      # path matches the provisioning mount below.
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/ragops.json
+      # Telemetry off: no reason for a local dev stack to phone home.
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+    volumes:
+      # Provisioning: the datasource + dashboard-provider config Grafana reads at
+      # boot. THIS is what makes the dashboard reproducible — see the comments in
+      # those two files. Without it a fresh Grafana knows nothing, and every panel
+      # reads "datasource not found".
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      # The dashboard JSON itself, at the path the provider scans. Read-only: the
+      # file in git is the source of truth. To change a panel, edit it in the UI,
+      # then use the share/export dialog to copy the JSON back into this file — a
+      # UI edit alone lives only in Grafana's DB and dies with the container.
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # Grafana's own sqlite (users, sessions, UI state). Not the dashboard —
+      # that's provisioned above — but without this you re-login every restart.
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   opensearch-data:
   hf-cache:
+  prometheus-data:
+  grafana-data:

@@ -1,0 +1,26 @@
+# Grafana dashboard provisioning (W7 D4).
+#
+# Tells Grafana: "load every dashboard JSON in this directory, at boot and
+# whenever it changes." That's the mechanism behind the D4 requirement that the
+# panel JSON live in the repo — the dashboard becomes a reviewable file in git,
+# not something that exists only inside one person's Grafana. Delete the
+# container, recreate it, and the dashboard is still there.
+
+apiVersion: 1
+
+providers:
+  - name: ragops
+    orgId: 1
+    folder: "" # top level — one dashboard doesn't need a folder
+    type: file
+    # Don't let a UI "delete" remove a file-provisioned dashboard; it would come
+    # straight back on the next restart anyway, so refusing is the honest answer.
+    disableDeletion: true
+    # Re-read the files periodically, so editing the JSON on disk shows up
+    # without restarting Grafana — the tight loop you want while building panels.
+    updateIntervalSeconds: 10
+    options:
+      # The in-container path. docker-compose.yml mounts
+      # ./monitoring/grafana/dashboards here, read-only.
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

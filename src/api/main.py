@@ -38,15 +38,17 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from opensearchpy.exceptions import ConnectionError as OSConnectionError
 from opensearchpy.exceptions import ConnectionTimeout
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from src.agent.graph import _is_refusal
 from src.answer import answer
 from src.api.deps import build_deps, ping_opensearch
 from src.api.schemas import AskRequest, AskResponse, HealthResponse
 from src.config import LLM, SERVING
+from src.metrics import ask_exceptions_total, classify_outcome, record_ask
 
 logging.basicConfig(
     level=logging.INFO,
@@ -110,6 +112,35 @@ def health(request: Request) -> HealthResponse:
     return body
 
 
+@app.get("/metrics", include_in_schema=False)
+def metrics() -> Response:
+    """Prometheus scrape endpoint — the whole registry, in its text format (D4).
+
+    Prometheus is a PULL system: nothing here pushes anywhere. Every ~15s the
+    Prometheus server GETs this path, parses the counters/histograms, and stores
+    them as time series stamped with the scrape time. That inversion is the
+    reason this endpoint is the entire integration — the app just has to keep
+    honest numbers in memory and let itself be read. It also means metrics
+    survive Prometheus being down (we keep counting; it backfills nothing, but
+    the counters are cumulative so no *totals* are lost — only resolution).
+
+    Why counters are cumulative-since-boot rather than per-interval: a restart
+    resets them to 0, and Prometheus DETECTS that reset and handles it in
+    `rate()`. Deltas computed by the app couldn't survive a missed scrape.
+
+    `include_in_schema=False` keeps this out of the public /docs — it's an
+    operator endpoint, not part of the product's API contract. It's also worth
+    knowing this is an information leak in the making: it exposes traffic volume
+    and spend to anyone who can reach it. Fine here (D3's Caddy only proxies
+    /ask and /health publicly, so this is not internet-reachable), but a real
+    deployment authenticates it or binds it to an internal interface.
+    """
+    # generate_latest() renders the default REGISTRY — every metric defined in
+    # src/metrics.py registered itself there at import time — into the Prometheus
+    # exposition format, which is why the media type must be theirs, not JSON.
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
 @app.post("/ask", response_model=AskResponse)
 def ask_endpoint(req: AskRequest, request: Request) -> AskResponse:
     """Answer a question over the vLLM docs, with citations.
@@ -137,6 +168,12 @@ def ask_endpoint(req: AskRequest, request: Request) -> AskResponse:
         # A dependency is down — not the caller's fault. 503 tells the client this
         # is retryable. The exception TYPE goes to the log; the client gets a
         # plain sentence, never a traceback or a connection string.
+        # The metric carries only that same exception CLASS as its label — never
+        # the message. Label values become time series, so a message with a query
+        # or an id in it would mint an unbounded number of them and melt
+        # Prometheus (the classic "cardinality explosion"). Detail belongs in the
+        # log line; the metric answers "how often, and which class".
+        ask_exceptions_total.labels(kind=type(exc).__name__).inc()
         log.error("ask failed: OpenSearch unreachable (%s)", type(exc).__name__)
         raise HTTPException(
             status_code=503,
@@ -146,18 +183,32 @@ def ask_endpoint(req: AskRequest, request: Request) -> AskResponse:
         # exc_info puts the full traceback in the SERVER log, where it's useful;
         # the client gets a stable, information-free message. Leaking internals
         # here is how stack traces (and sometimes keys) end up in a user's browser.
+        ask_exceptions_total.labels(kind=type(exc).__name__).inc()
         log.error("ask failed: unexpected error", exc_info=exc)
         raise HTTPException(
             status_code=500, detail="Internal error while answering the question."
         ) from exc
 
-    latency_ms = (time.perf_counter() - t0) * 1000
+    latency_s = time.perf_counter() - t0
+    latency_ms = latency_s * 1000
 
-    # --- Instrumentation (the raw material for D4 monitoring). These are the
-    # numbers that actually describe RAG service health: how slow, which engine,
-    # how many tool rounds it needed, and whether the user got a real answer or a
-    # refusal/fallback. Logged per request; D4 will aggregate them.
+    # --- Instrumentation. These are the numbers that actually describe RAG
+    # service health: how slow, which engine, how many tool rounds it needed, and
+    # whether the user got a real answer or a refusal/fallback.
+    #
+    # D4 makes the same facts go two places, on purpose — the logs-vs-metrics
+    # split (see src/metrics.py). The log line below keeps the per-request detail
+    # (including the question text) for debugging one bad answer; record_ask()
+    # feeds the aggregate view (p95, QPS, refusal rate) that a dashboard and an
+    # alert read. Neither substitutes for the other: you can't alert on a log
+    # line, and you can't debug a histogram bucket.
     refused = _is_refusal(result["answer"])
+    record_ask(
+        mode=result["mode"],
+        outcome=classify_outcome(degraded=result["degraded"], refused=refused),
+        latency_s=latency_s,
+        steps=result["steps"],
+    )
     log.info(
         'ask mode=%s steps=%d degraded=%s refused=%s citations=%d latency_ms=%.0f q="%s"',
         result["mode"],

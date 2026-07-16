@@ -178,6 +178,13 @@ class LLMConfig:
     `temperature=0` makes generation as deterministic as possible — for a
     grounded "answer only from the docs" assistant we want faithfulness, not
     creativity. `max_tokens` caps answer length (cost + latency).
+
+    The two `price_*` fields are what turn token counts into DOLLARS in
+    src/metrics.py (`llm_cost_usd_total`). They live here, next to `model`,
+    because a price is a property OF a model: switch the model and the price must
+    move with it, or every cost number the dashboard shows is quietly wrong.
+    Units are USD per 1M tokens — the way every provider quotes them — so these
+    can be copy-checked against the pricing page without arithmetic.
     """
 
     provider: str = "deepseek"  # "deepseek" | "openai" | "anthropic"
@@ -190,6 +197,15 @@ class LLMConfig:
     # reasoning + the visible answer.
     max_tokens: int = 2048
     temperature: float = 0.0
+    # ⚠ PLACEHOLDER PRICES — verify against https://platform.deepseek.com/pricing
+    # before quoting any $/query figure. These are DeepSeek's older deepseek-chat
+    # cache-miss rates, NOT confirmed deepseek-v4-pro rates; the cost metric is
+    # only as honest as these two numbers.
+    # Note on this model specifically: it's a thinking model, and its reasoning
+    # tokens are billed as COMPLETION tokens even though you never see them — so
+    # the completion side of the bill runs well above visible answer length.
+    price_prompt_usd_per_1m: float = 0.27
+    price_completion_usd_per_1m: float = 1.10
 
 
 @dataclass(frozen=True)
