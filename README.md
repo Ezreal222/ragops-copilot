@@ -1,5 +1,7 @@
 # RAGOps Copilot
 
+[![CI](https://github.com/Ezreal222/ragops-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/Ezreal222/ragops-copilot/actions/workflows/ci.yml)
+
 > A production-grade RAG (and Agent) assistant over the **vLLM documentation**.
 > Ask a question → retrieve relevant doc chunks → (rerank) → LLM answers **with citations** →
 > retrieval quality is **measured** (recall@k, then RAGAS). The focus is production engineering —

@@ -22,13 +22,13 @@ jobs:
     name: lint + test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Official uv action: installs uv AND caches the dependency downloads keyed
       # on uv.lock, so after the first run the ~200 MB CPU-torch install is a cache
       # hit and the job is fast. python-version pins the interpreter uv provisions.
       - name: Set up uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
           python-version: "3.11"
@@ -58,7 +58,7 @@ jobs:
     # jobs show as an ordered pipeline in the Actions UI.
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # build-push-action needs Buildx for the `gha` cache backend below.
       - name: Set up Docker Buildx
