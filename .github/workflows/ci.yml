@@ -107,9 +107,8 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          script_stop: true   # abort on the first failing command
           script: |
-            set -e
+            set -e   # abort the remote script on the first failing command
             cd ~/ragops-copilot
             # Fetch + hard-reset (not `git pull`): CD must converge to exactly
             # what's on main, with no chance of a merge conflict from any drift
