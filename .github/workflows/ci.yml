@@ -121,14 +121,14 @@ jobs:
             # on the box, so a code-only change rebuilds in seconds. No re-ingest:
             # the corpus is unchanged and the index persists in its volume.
             docker compose -f docker-compose.prod.yml up -d --build
-            # Deploy isn't done until the service can actually answer. /health is
-            # strict (503 unless OpenSearch is reachable AND the index is
-            # non-empty), so this fails the job if the new build came up broken.
+            # Deploy isn't done until the service can actually answer. Reuse the
+            # container's OWN healthcheck (defined in the Dockerfile, urllib-based
+            # and strict: unhealthy unless OpenSearch is reachable AND the index is
+            # non-empty) rather than re-implementing the probe here — the runtime
+            # image ships no curl on purpose, so exec'ing curl would always fail.
             for i in $(seq 1 30); do
-              if docker compose -f docker-compose.prod.yml exec -T api \
-                   curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
-                echo "deploy healthy"; exit 0
-              fi
-              echo "waiting for health ($i)..."; sleep 4
+              h=$(docker inspect --format '{{.State.Health.Status}}' ragops-api 2>/dev/null || echo missing)
+              if [ "$h" = "healthy" ]; then echo "deploy healthy"; exit 0; fi
+              echo "health=$h ($i)..."; sleep 4
             done
-            echo "health check did not pass in time"; exit 1
+            echo "container did not become healthy in time"; exit 1
