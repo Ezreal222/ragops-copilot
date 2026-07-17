@@ -79,3 +79,57 @@ jobs:
           tags: ragops-copilot:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # CD — deploy to the EC2 demo box. This is the "D" in CI/CD: once main is
+  # green (tests pass AND the image builds), ship it automatically.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: deploy to EC2
+    runs-on: ubuntu-latest
+    # Only after BOTH gates pass — never deploy a commit that failed tests or
+    # whose image didn't build.
+    needs: [test, build]
+    # ...and only for real pushes to main. A PR from a fork must NOT be able to
+    # trigger a production deploy, and feature branches shouldn't either. Env
+    # `production` is where the EC2 secrets live (and where you can add a manual
+    # approval gate later).
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+    steps:
+      # No checkout needed — the box pulls its own code from git. This job just
+      # opens an SSH session and runs the update remotely.
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          # All connection details come from GitHub Secrets — nothing about the
+          # box (host, user, key) is committed to the repo.
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true   # abort on the first failing command
+          script: |
+            set -e
+            cd ~/ragops-copilot
+            # Fetch + hard-reset (not `git pull`): CD must converge to exactly
+            # what's on main, with no chance of a merge conflict from any drift
+            # on the box. .env and data/ are gitignored + untracked, so they are
+            # left completely untouched — the DeepSeek key and the built index
+            # survive every deploy.
+            git fetch --quiet origin main
+            git reset --hard origin/main
+            # Rebuild + restart only what changed. The CPU-torch layer is cached
+            # on the box, so a code-only change rebuilds in seconds. No re-ingest:
+            # the corpus is unchanged and the index persists in its volume.
+            docker compose -f docker-compose.prod.yml up -d --build
+            # Deploy isn't done until the service can actually answer. /health is
+            # strict (503 unless OpenSearch is reachable AND the index is
+            # non-empty), so this fails the job if the new build came up broken.
+            for i in $(seq 1 30); do
+              if docker compose -f docker-compose.prod.yml exec -T api \
+                   curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+                echo "deploy healthy"; exit 0
+              fi
+              echo "waiting for health ($i)..."; sleep 4
+            done
+            echo "health check did not pass in time"; exit 1
