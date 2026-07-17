@@ -1,0 +1,51 @@
+# CI — lint + hermetic tests on every push / PR (W7 D5, step 1).
+#
+# What "green" here proves: the change installs from the SAME pinned lockfile CI
+# and prod use, passes ruff, and passes every test that needs no external service.
+# That's the CI half of CI/CD — catch regressions automatically, before merge,
+# instead of "it worked on my machine". (The docker-build job is step 2, added
+# next.)
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# If you push twice quickly, cancel the older run — no point spending CI minutes
+# on a commit that's already superseded on the same branch/PR.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: lint + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Official uv action: installs uv AND caches the dependency downloads keyed
+      # on uv.lock, so after the first run the ~200 MB CPU-torch install is a cache
+      # hit and the job is fast. python-version pins the interpreter uv provisions.
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      # --frozen: install EXACTLY what uv.lock pins — fail if the lockfile is stale
+      # rather than silently resolving something new. This is what makes CI
+      # reproducible and worth trusting.
+      # --no-default-groups --group cpu: skip the GPU torch (there's no CUDA on the
+      # runner) and take the CPU wheel instead. --group dev adds ruff + pytest.
+      - name: Install dependencies (CPU + dev)
+        run: uv sync --frozen --no-default-groups --group cpu --group dev
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      # -m "not integration": run only the hermetic tests. Anything needing a live
+      # OpenSearch / real LLM key is marked `integration` and skipped here (it has
+      # no cluster to talk to); those belong in a services-backed job later.
+      - name: Test (pytest, hermetic only)
+        run: uv run pytest -q -m "not integration"

@@ -51,6 +51,10 @@ dependencies = [
 # only in build. It also keeps the host on the version already proven on the 5080
 # instead of silently upgrading it the next time we relock.
 cpu = ["torch==2.12.1"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.9",
+]
 gpu = ["torch==2.12.1"]
 
 [tool.uv]
@@ -74,3 +78,26 @@ explicit = true
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
 explicit = true
+
+# --- Lint (ruff) + tests (pytest) — pinned so CI reproduces local exactly -------
+# ruff runs on the whole tree; data/ (the vLLM source corpus) is .gitignored, which
+# ruff respects, so its thousands of files never get linted. We keep ruff's default
+# rule set (pyflakes F + a subset of pycodestyle E) — enough to catch unused
+# imports / undefined names without fighting style noise on day one.
+[tool.ruff]
+target-version = "py311"
+extend-exclude = ["data", "notebooks"]
+
+[tool.pytest.ini_options]
+# pythonpath=["."] puts the repo root on sys.path so `import src.config` works the
+# same way `uv run python -m src....` already does — no editable install needed.
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
+# One marker, registered here so `-m "not integration"` is a real filter (and
+# unknown-marker warnings stay off). CI runs only the unmarked (hermetic) tests;
+# anything needing a live OpenSearch/LLM gets @pytest.mark.integration and is
+# skipped there.
+markers = [
+    "integration: needs a running OpenSearch or a real LLM API key (skipped in CI)",
+]
