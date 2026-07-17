@@ -3,8 +3,8 @@
 # What "green" here proves: the change installs from the SAME pinned lockfile CI
 # and prod use, passes ruff, and passes every test that needs no external service.
 # That's the CI half of CI/CD — catch regressions automatically, before merge,
-# instead of "it worked on my machine". (The docker-build job is step 2, added
-# next.)
+# instead of "it worked on my machine". A second job builds the Docker image so a
+# Dockerfile that no longer builds fails CI too (a regression guard for D2's image).
 name: CI
 
 on:
@@ -49,3 +49,33 @@ jobs:
       # no cluster to talk to); those belong in a services-backed job later.
       - name: Test (pytest, hermetic only)
         run: uv run pytest -q -m "not integration"
+
+  build:
+    name: docker build
+    runs-on: ubuntu-latest
+    # Gate the build on green tests: no point spending minutes on a torch image
+    # for a commit whose unit tests already failed. `needs` also makes the two
+    # jobs show as an ordered pipeline in the Actions UI.
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      # build-push-action needs Buildx for the `gha` cache backend below.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build the D2 image. We only BUILD (push: false) — this is a regression
+      # check that the Dockerfile still produces a working image, not a release.
+      # cache-from/to gha stores the layer cache in GitHub Actions, so the
+      # multi-minute CPU-torch `uv sync` layer is a cache hit on later runs and
+      # only changed layers rebuild — the same layer-caching win the Dockerfile is
+      # written for, now applied in CI.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ragops-copilot:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
