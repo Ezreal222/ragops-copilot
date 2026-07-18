@@ -236,6 +236,44 @@ class ServingConfig:
     use_agent: bool = False
 
 
+@dataclass(frozen=True)
+class CacheConfig:
+    """Response-cache knobs (W7 D6) — skip the LLM on a repeat question.
+
+    The D6 profile proved the LLM call is ~99.9% of latency and ~all of the cost
+    (retrieval is ~13 ms). So the single highest-leverage latency win is to NOT
+    make the call at all when we've already answered this exact question: an
+    in-process cache turns a repeat /ask from a 4-13 s, paid LLM round-trip into a
+    sub-millisecond dict lookup at $0.
+
+    This is an EXACT-match (normalized) cache, not semantic: the key is the
+    whitespace-collapsed, lower-cased question plus the routing knobs that change
+    the answer (`use_agent`, `k`). Near-duplicate questions ("what's paged
+    attention" vs "what is PagedAttention?") do NOT hit — that needs an embedding
+    similarity cache, a real feature with its own false-hit risk, left as a noted
+    next step. Exact-match is the honest, safe MVP and already covers the common
+    real pattern (the same FAQ asked repeatedly, retries, refreshes).
+
+    - `enabled`: master switch. Off = every request pays the LLM (the pre-D6
+      behaviour), which is also what eval/measurement runs want so they never
+      measure a cached zero by accident.
+    - `max_size`: LRU capacity. Bounds memory — the cache holds whole answers, so
+      this is ~max_size × a few KB. Least-recently-used entries evict first.
+    - `ttl_s`: entry lifetime. The vLLM docs change slowly, but the index CAN be
+      re-ingested underneath us; a TTL bounds how long a stale answer can linger
+      after the corpus changes. 1 h is a safe default for a docs assistant.
+
+    Single-process scope: like the Prometheus counters (see metrics.py), this cache
+    lives in ONE uvicorn worker's memory. With multiple workers each keeps its own,
+    so the hit rate drops but correctness holds; a shared cache (Redis) is the
+    multi-worker answer, and the seam for it is ResponseCache in src/cache.py.
+    """
+
+    enabled: bool = True
+    max_size: int = 256
+    ttl_s: float = 3600.0  # 1 hour
+
+
 EMBED = EmbeddingConfig()
 INDEX = IndexConfig()
 RERANK = RerankConfig()
@@ -243,3 +281,4 @@ RETRIEVAL = RetrievalConfig()
 AGENT = AgentConfig()
 LLM = LLMConfig()
 SERVING = ServingConfig()
+CACHE = CacheConfig()

@@ -169,6 +169,56 @@ over the 36-question eval set, RAGAS judge = DeepSeek `deepseek-v4-flash`, temp 
   convergence improves — regression-driven progressive rollout: *if it degrades, you don't flip the
   default.* (`eval/compare_agent_vs_rag.csv`)
 
+## Results (W7 D6 · latency & cost optimization)
+
+**Profile before you optimize.** `eval/profile_latency.py` decomposes one `/ask` into its
+stages (8 eval questions, `top_k=5`, `deepseek-v4-pro`):
+
+| stage | mean | share |
+|---|---|---|
+| embed | 7.7 ms | 0.1% |
+| k-NN | 5.1 ms | 0.1% |
+| **LLM generation** | **9,743 ms** | **99.9%** |
+| total | 9,756 ms (p95 ~13 s) | |
+
+The LLM call is **763× the entire retrieval path** and ~all of the $0.00116/query cost
+(prompt 1488 tok = 35%, completion 691 tok = 65% — `deepseek-v4-pro` is a *thinking* model, so
+hidden reasoning tokens bill as completion). This kills the instinct to "put the embedder on a
+GPU": that 6 ms is 0.06% of the wall. **Every optimization below targets the LLM side.**
+
+Three levers, each measured before/after with a quality guard:
+
+| lever | latency | $/query | quality | verdict |
+|---|---|---|---|---|
+| baseline (`k=5`, rag) | p95 ~13 s | $0.00116 | recall@5 **0.688** | — |
+| ① `top_k` 5→3 | ~unchanged¹ | **$0.00088 (−24%)** | recall@3 **0.625 (−6.3pt)** | ❌ **reject** |
+| ② response cache (hit) | **0.03 ms** | **$0** | identical answer | ✅ **ship** |
+| ③ agent vs rag | agent **1.9× slower** | agent **2.5×** ($0.00216) | — | ✅ keep rag default |
+
+¹ latency is completion-bound, so shrinking the prompt barely moves it — the k=3 win is purely
+cost, and not worth losing 6 points of retrieval coverage on an already-$0.001 query.
+
+- **① Lower `top_k` — rejected (honest negative).** k=3 cuts prompt tokens 38% and cost 24%, but
+  drops recall@k 0.688 → 0.625 (`eval.eval_retrieval`). For a grounding-critical docs assistant
+  that trade is bad; **`top_k` stays 5** (also the W5 ablation optimum).
+- **② Response cache — shipped.** An exact-match, normalized-key LRU+TTL cache
+  (`src/cache.py`, `CacheConfig`) turns a repeat question from a ~6 s, paid LLM round-trip into a
+  **0.03 ms, $0** dict lookup — a hit skips the whole pipeline. Case/whitespace variants collapse
+  to one entry; `use_agent` and `k` are part of the key so a cached agent answer can't be served to
+  a fixed-RAG request. Hit rate is exported as `ask_cache_total{result}`. Semantic (near-duplicate)
+  matching is a noted next step, not a silent default. **On by default** (`CACHE.enabled=True`).
+- **③ Agent premium — quantified.** Driving both engines over an identical question mix
+  (`monitoring.generate_traffic`), the agent path costs **1.9× the latency and 2.5× the dollars**
+  (3.4× prompt tokens — it re-feeds tool outputs every turn). That number *is* the justification for
+  the `use_agent=False` default from W6: the agent isn't just a quality regression, it's a
+  cost/latency one too.
+
+**The discipline, not just the numbers:** measure first (retrieval was never the problem), keep
+each change gated on the frozen eval set (don't buy speed with quality), and record the negative
+result (k=3) as loudly as the win. Self-hosting a faster/cheaper model is the next lever — and the
+bridge to Project 2 (vLLM serving), where the 99.9%-of-latency LLM call is exactly what gets
+optimized. (`eval/profile_latency.py`, `src/cache.py`)
+
 ## How to run
 
 ### Quickstart: the whole system in one command (Docker)

@@ -123,6 +123,19 @@ agent_steps_last = Gauge(
     "Tool-call rounds used by the most recently completed question.",
 )
 
+# --- Response cache (W7 D6) ---------------------------------------------------
+# The hit rate is the whole story of the cache: a hit skipped a 4-13 s, paid LLM
+# call, so `rate(ask_cache_total{result="hit"}) / rate(ask_cache_total)` is
+# exactly how much traffic the cache is saving. A Counter (not a Gauge) because,
+# like every other volume here, we want its rate over a window, and it must
+# survive a scrape gap. Kept separate from ask_requests_total{outcome} because a
+# hit is orthogonal to the answer's outcome — a cached refusal is still a hit.
+ask_cache_total = Counter(
+    "ask_cache_total",
+    "Response-cache lookups on /ask, by result.",
+    labelnames=("result",),  # hit | miss
+)
+
 # --- LLM cost -----------------------------------------------------------------
 llm_tokens_total = Counter(
     "llm_tokens_total",

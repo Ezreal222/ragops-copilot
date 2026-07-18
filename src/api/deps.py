@@ -35,7 +35,8 @@ from typing import Any
 
 from src.agent import tools as agent_tools
 from src.agent.graph import build_graph
-from src.config import EMBED, INDEX, LLM, RERANK, RETRIEVAL, SERVING
+from src.cache import ResponseCache
+from src.config import CACHE, EMBED, INDEX, LLM, RERANK, RETRIEVAL, SERVING
 from src.embeddings import Embedder
 from src.generate import get_client as get_llm_client
 from src.opensearch_client import get_client as get_os_client
@@ -53,6 +54,7 @@ class Deps:
     reranker: Reranker | None  # None when RETRIEVAL.use_reranker is False
     llm_client: Any  # openai.OpenAI — used by the fixed-RAG path
     graph: Any  # compiled LangGraph app — used by the agent path
+    cache: ResponseCache  # W7 D6 — repeat /ask skips the LLM (see src/cache.py)
 
 
 def build_deps() -> Deps:
@@ -90,6 +92,17 @@ def build_deps() -> Deps:
     # copy of the model rather than one per routing path (see module docstring).
     agent_tools.preload_resources(embedder=embedder, os_client=os_client)
 
+    # The response cache is built unconditionally (it's a tiny dict); whether it's
+    # consulted is CACHE.enabled, checked per request in the handler. That keeps
+    # "is caching on?" a one-line config flip, not a wiring change.
+    log.info(
+        "startup: response cache %s (max_size=%d, ttl=%.0fs)",
+        "ON" if CACHE.enabled else "OFF (config)",
+        CACHE.max_size,
+        CACHE.ttl_s,
+    )
+    cache = ResponseCache(max_size=CACHE.max_size, ttl_s=CACHE.ttl_s)
+
     log.info("startup: ready (default mode=%s)", "agent" if SERVING.use_agent else "rag")
     return Deps(
         embedder=embedder,
@@ -97,6 +110,7 @@ def build_deps() -> Deps:
         reranker=reranker,
         llm_client=llm_client,
         graph=graph,
+        cache=cache,
     )
 
 

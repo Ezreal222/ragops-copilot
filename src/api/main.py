@@ -47,8 +47,9 @@ from src.agent.graph import _is_refusal
 from src.answer import answer
 from src.api.deps import build_deps, ping_opensearch
 from src.api.schemas import AskRequest, AskResponse, HealthResponse
-from src.config import LLM, SERVING
-from src.metrics import ask_exceptions_total, classify_outcome, record_ask
+from src.cache import make_key
+from src.config import CACHE, LLM, SERVING
+from src.metrics import ask_cache_total, ask_exceptions_total, classify_outcome, record_ask
 
 logging.basicConfig(
     level=logging.INFO,
@@ -153,6 +154,39 @@ def ask_endpoint(req: AskRequest, request: Request) -> AskResponse:
     deps = request.app.state.deps
     t0 = time.perf_counter()
 
+    # --- Response cache (W7 D6). The profile proved the LLM call is ~99.9% of the
+    # latency and ~all of the cost, so the biggest win on a REPEAT question is to
+    # not make the call at all. We key on the question plus the two knobs that
+    # change the answer — the RESOLVED route (req.use_agent or the server default)
+    # and k — so a cached agent answer can't be served to a fixed-RAG request.
+    effective_agent = SERVING.use_agent if req.use_agent is None else req.use_agent
+    cache_key = make_key(req.question, use_agent=effective_agent, k=req.k)
+
+    if CACHE.enabled:
+        cached = deps.cache.get(cache_key)
+        if cached is not None:
+            # Hit: the whole pipeline collapses to this dict lookup. We still record
+            # the request — its (tiny) latency is real serving time and correctly
+            # pulls p95 down, which is the point — but NOT any LLM cost, because no
+            # LLM ran (record_llm_usage lives on the miss path, inside answer()).
+            ask_cache_total.labels(result="hit").inc()
+            latency_s = time.perf_counter() - t0
+            refused = _is_refusal(cached["answer"])
+            record_ask(
+                mode=cached["mode"],
+                outcome=classify_outcome(degraded=cached["degraded"], refused=refused),
+                latency_s=latency_s,
+                steps=cached["steps"],
+            )
+            log.info(
+                'ask CACHE HIT mode=%s latency_ms=%.2f q="%s"',
+                cached["mode"],
+                latency_s * 1000,
+                " ".join(req.question.split())[:80],
+            )
+            return AskResponse(**cached, latency_ms=latency_s * 1000)
+        ask_cache_total.labels(result="miss").inc()
+
     try:
         result = answer(
             req.question,
@@ -219,5 +253,12 @@ def ask_endpoint(req: AskRequest, request: Request) -> AskResponse:
         latency_ms,
         " ".join(req.question.split())[:80],
     )
+
+    # Store the fresh result so the next identical question is a cache hit. We only
+    # reach here on success — the except blocks above raise, so errors are never
+    # cached. Refusals ARE cached on purpose: an honest "not in the docs" is a
+    # valid, deterministic answer, and re-deriving it would burn another LLM call.
+    if CACHE.enabled:
+        deps.cache.set(cache_key, result)
 
     return AskResponse(**result, latency_ms=latency_ms)
